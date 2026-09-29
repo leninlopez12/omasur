@@ -1,0 +1,7 @@
+node_modules
+dist
+.env
+uploads/*
+!uploads/.gitkeep
+# Llevan datos personales y contraseñas cifradas: nunca al repositorio.
+respaldos/

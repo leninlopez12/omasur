@@ -1,0 +1,96 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/**
+ * Tamaños de letra de los paneles (tutor, supervisor y administrador).
+ *
+ * Los paneles se escribieron con la misma escala que la portada, donde la
+ * letra grande tiene sentido porque se lee de lejos. Adentro, en cambio, hay
+ * tablas y formularios: la misma escala se sentía enorme y obligaba a
+ * desplazarse de más.
+ *
+ * En vez de tocar cientos de clases una por una, se bajan aquí un nivel dentro
+ * del panel. La portada y la inscripción no se tocan: usan las mismas clases,
+ * pero fuera de este contenedor.
+ *
+ * El selector lleva dos clases, así que gana sobre la utilidad de Tailwind sin
+ * necesidad de !important.
+ */
+.panel-ajustado .text-6xl {
+  font-size: 3rem;
+  line-height: 1;
+}
+.panel-ajustado .text-5xl {
+  font-size: 2.25rem;
+  line-height: 2.5rem;
+}
+.panel-ajustado .text-4xl {
+  font-size: 1.875rem;
+  line-height: 2.25rem;
+}
+.panel-ajustado .text-3xl {
+  font-size: 1.5rem;
+  line-height: 2rem;
+}
+.panel-ajustado .text-2xl {
+  font-size: 1.25rem;
+  line-height: 1.75rem;
+}
+.panel-ajustado .text-xl {
+  font-size: 1.125rem;
+  line-height: 1.75rem;
+}
+.panel-ajustado .text-lg {
+  font-size: 1rem;
+  line-height: 1.5rem;
+}
+.panel-ajustado .text-base {
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+}
+.panel-ajustado .text-sm {
+  font-size: 0.8125rem;
+  line-height: 1.125rem;
+}
+
+/* En el celular baja otro escalón: la pantalla es angosta y con la letra de
+   escritorio cada tarjeta ocupaba media pantalla. */
+@media (max-width: 639px) {
+  .panel-ajustado .text-6xl {
+    font-size: 2.25rem;
+    line-height: 2.5rem;
+  }
+  .panel-ajustado .text-5xl {
+    font-size: 1.875rem;
+    line-height: 2.25rem;
+  }
+  .panel-ajustado .text-4xl {
+    font-size: 1.5rem;
+    line-height: 2rem;
+  }
+  .panel-ajustado .text-3xl {
+    font-size: 1.25rem;
+    line-height: 1.75rem;
+  }
+  .panel-ajustado .text-2xl {
+    font-size: 1.125rem;
+    line-height: 1.625rem;
+  }
+  .panel-ajustado .text-xl {
+    font-size: 1rem;
+    line-height: 1.5rem;
+  }
+  .panel-ajustado .text-lg {
+    font-size: 0.9375rem;
+    line-height: 1.375rem;
+  }
+  .panel-ajustado .text-base {
+    font-size: 0.8125rem;
+    line-height: 1.125rem;
+  }
+  .panel-ajustado .text-sm {
+    font-size: 0.75rem;
+    line-height: 1.0625rem;
+  }
+}

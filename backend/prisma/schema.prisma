@@ -1,0 +1,239 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum RolStaff {
+  ADMIN
+  SUPERVISOR
+}
+
+enum Modalidad {
+  ESTATAL
+  PARTICULAR
+  GRUPO_ESTUDIO
+}
+
+// Niveles en los que compite la institucion. AMBOS es el valor seguro por
+// defecto: no restringe grados a las delegaciones que ya existian.
+enum NivelInstitucion {
+  PRIMARIA
+  SECUNDARIA
+  AMBOS
+}
+
+enum Nivel {
+  PRIMARIA
+  SECUNDARIA
+}
+
+enum Grado {
+  TERCERO_PRIMARIA
+  CUARTO_PRIMARIA
+  QUINTO_PRIMARIA
+  SEXTO_PRIMARIA
+  PRIMERO_SECUNDARIA
+  SEGUNDO_SECUNDARIA
+  TERCERO_SECUNDARIA
+  CUARTO_SECUNDARIA
+  QUINTO_SECUNDARIA
+}
+
+enum EstadoInscripcion {
+  BORRADOR
+  PENDIENTE_PAGO
+  EN_REVISION
+  APROBADA
+  OBSERVADA
+}
+
+enum MetodoPago {
+  YAPE
+  BCP
+}
+
+enum EstadoPago {
+  EN_REVISION
+  APROBADO
+  RECHAZADO
+}
+
+model Admin {
+  id        String   @id @default(cuid())
+  dni       String?  @unique
+  nombre    String
+  correo    String   @unique
+  password  String
+  rol       RolStaff @default(ADMIN)
+  createdAt DateTime @default(now())
+}
+
+model Tutor {
+  id               String            @id @default(cuid())
+  dni              String?           @unique
+  nombres          String
+  apellidos        String
+  celular          String
+  correo           String            @unique
+  password         String
+  institucion      String            @default("")
+  modalidad        Modalidad         @default(ESTATAL)
+  nivelInstitucion NivelInstitucion  @default(AMBOS)
+  departamento     String            @default("")
+  region           String            @default("")
+  provincia        String            @default("")
+  distrito         String            @default("")
+  estado           EstadoInscripcion @default(BORRADOR)
+  observacion      String?
+  respuesta        String?
+  // Quien resolvio la inscripcion y cuando: con varios supervisores hace
+  // falta saber de quien fue la decision.
+  revisadoPor      String?
+  revisadoEn       DateTime?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  students        Student[]
+  payments        Payment[]
+  notificaciones  Notificacion[] @relation("AvisoDelegacion")
+  avisosRecibidos Notificacion[] @relation("AvisoDestinatario")
+
+  @@index([estado])
+}
+
+model Student {
+  id        String   @id @default(cuid())
+  dni       String   @unique
+  nombres   String
+  grado     Grado
+  nivel     Nivel
+  categoria String
+  tutorId   String
+  tutor     Tutor    @relation(fields: [tutorId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  // Comprobante que cubre a este alumno. Vacío = todavía no está pagado.
+  paymentId String?
+  payment   Payment? @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+
+  @@index([tutorId])
+  @@index([dni])
+  @@index([paymentId])
+}
+
+model Payment {
+  id          String     @id @default(cuid())
+  tutorId     String
+  tutor       Tutor      @relation(fields: [tutorId], references: [id], onDelete: Cascade)
+  metodo      MetodoPago @default(YAPE)
+  monto       Float
+  operacion   String?
+  archivoUrl  String
+  estado      EstadoPago @default(EN_REVISION)
+  observacion String?
+  revisadoPor String?
+  revisadoEn  DateTime?
+  createdAt   DateTime   @default(now())
+
+  // Alumnos que cubre este comprobante.
+  students Student[]
+
+  @@index([tutorId])
+}
+
+model GrupoWhatsapp {
+  id        String   @id @default(cuid())
+  nombre    String
+  enlace    String   @default("")
+  lleno     Boolean  @default(false)
+  orden     Int      @default(0)
+  createdAt DateTime @default(now())
+
+  @@index([orden])
+}
+
+model Ajuste {
+  clave String @id
+  valor String
+}
+
+enum TipoNotificacion {
+  TUTOR_REGISTRADO
+  PAGO_ENVIADO
+  INSCRIPCION_ENVIADA
+  OBSERVACION_ABSUELTA
+  INSCRIPCION_APROBADA
+  INSCRIPCION_OBSERVADA
+}
+
+model Notificacion {
+  id        String           @id @default(cuid())
+  tipo      TipoNotificacion
+  titulo    String
+  detalle   String
+  leida     Boolean          @default(false)
+  createdAt DateTime         @default(now())
+
+  // Delegación a la que se refiere el aviso.
+  tutorId String?
+  tutor   Tutor?  @relation("AvisoDelegacion", fields: [tutorId], references: [id], onDelete: SetNull)
+
+  // Destinatario: si está vacío, el aviso es para la comisión.
+  paraTutorId String?
+  paraTutor   Tutor?  @relation("AvisoDestinatario", fields: [paraTutorId], references: [id], onDelete: Cascade)
+
+  @@index([paraTutorId])
+  @@index([leida])
+  @@index([createdAt])
+}
+
+model SuscripcionPush {
+  id        String   @id @default(cuid())
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  adminId   String?
+  createdAt DateTime @default(now())
+
+  @@index([adminId])
+}
+
+// Enlace de un solo uso para restablecer la contraseña. Se guarda el hash del
+// token, nunca el token en claro: si alguien leyera la base de datos no podría
+// tomar ninguna cuenta.
+model TokenRecuperacion {
+  id        String    @id @default(cuid())
+  tokenHash String    @unique
+  correo    String
+  cuentaId  String
+  esStaff   Boolean   @default(false)
+  expiraEn  DateTime
+  usadoEn   DateTime?
+  ip        String?
+  createdAt DateTime  @default(now())
+
+  @@index([correo])
+  @@index([cuentaId])
+  @@index([expiraEn])
+}
+
+// Avisos que la comision manda a todos los tutores de un grupo. Queda el
+// registro de que se mando, a quienes y como fue, para no repetir envios ni
+// quedarse con la duda de si salio.
+model AvisoMasivo {
+  id        String    @id @default(cuid())
+  grupo     String
+  asunto    String
+  mensaje   String
+  total     Int       @default(0)
+  enviados  Int       @default(0)
+  fallidos  Int       @default(0)
+  estado    String    @default("ENVIANDO")
+  creadoPor String?
+  createdAt DateTime  @default(now())
+  cerradoEn DateTime?
+}

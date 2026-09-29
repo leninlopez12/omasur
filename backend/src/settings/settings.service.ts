@@ -1,0 +1,368 @@
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service';
+import { StorageService } from '../storage/storage.service';
+
+/** Datos de la cuenta del BCP, la otra forma de pago además de Yape. */
+const CLAVES_BCP = {
+  titular: 'bcp_titular',
+  cuenta: 'bcp_cuenta',
+  cci: 'bcp_cci',
+} as const;
+/**
+ * Botón flotante de WhatsApp de la portada. El número va en formato
+ * internacional sin signos (51 + celular) porque así lo pide wa.me.
+ */
+const CLAVES_WHATSAPP = {
+  numero: 'whatsapp_numero',
+  mensaje: 'whatsapp_mensaje',
+} as const;
+
+/** Lo que se muestra mientras la comisión no configure el suyo. */
+const WHATSAPP_POR_DEFECTO = {
+  numero: '51928853577',
+  mensaje: 'Hola, quiero información sobre el I OMASUR UNI 2026',
+};
+
+export const CLAVE_CIERRE = 'inscripciones_cerradas';
+const CLAVE_CIERRE_FECHA = 'inscripciones_cerradas_en';
+
+/**
+ * Archivos que sube la comisión: los dos fondos, el QR de Yape y las bases.
+ *
+ * Todos viven en Cloudflare. En la base solo queda la referencia interna del
+ * archivo; al navegador se le manda la dirección de la API, que es fija y no
+ * cambia aunque se reemplace el archivo. Así el bucket sigue cerrado y nadie
+ * ve la clave real, que está junto a los comprobantes.
+ */
+const ARCHIVOS = {
+  hero: {
+    clave: 'imagen_hero',
+    carpeta: 'publico/fondos',
+    url: '/api/ajustes/imagenes/hero',
+    formato: 'imagen',
+  },
+  login: {
+    clave: 'imagen_login',
+    carpeta: 'publico/fondos',
+    url: '/api/ajustes/imagenes/login',
+    formato: 'imagen',
+  },
+  yape: {
+    clave: 'yape_qr',
+    carpeta: 'publico/yape',
+    url: '/api/ajustes/yape',
+    formato: 'imagen',
+  },
+  bases: {
+    clave: 'bases_archivo',
+    carpeta: 'publico/bases',
+    url: '/api/ajustes/bases',
+    formato: 'pdf',
+  },
+} as const;
+
+export type ArchivoAdministrado = keyof typeof ARCHIVOS;
+/** Los dos fondos, que el panel administra juntos. */
+export type TipoImagen = 'hero' | 'login';
+
+type Formato = 'imagen' | 'pdf';
+
+const MAXIMOS: Record<Formato, number> = {
+  imagen: 8 * 1024 * 1024,
+  pdf: 20 * 1024 * 1024,
+};
+
+/** Sufijos con los que se guardan los datos de cada archivo. */
+const DATOS = ['_nombre', '_mime', '_tamano', '_actualizado'];
+
+@Injectable()
+export class SettingsService {
+  constructor(
+    private prisma: PrismaService,
+    private almacenamiento: StorageService,
+  ) {}
+
+  /** Lo que necesita la web pública: grupos, QR, imágenes y si la inscripción sigue abierta. */
+  async publicos() {
+    const [
+      grupos,
+      cierre,
+      fecha,
+      titular,
+      cuenta,
+      cci,
+      waNumero,
+      waMensaje,
+      hero,
+      login,
+      yape,
+      bases,
+    ] = await Promise.all([
+      this.prisma.grupoWhatsapp.findMany({ orderBy: [{ orden: 'asc' }, { createdAt: 'asc' }] }),
+      this.prisma.ajuste.findUnique({ where: { clave: CLAVE_CIERRE } }),
+      this.prisma.ajuste.findUnique({ where: { clave: CLAVE_CIERRE_FECHA } }),
+      this.prisma.ajuste.findUnique({ where: { clave: CLAVES_BCP.titular } }),
+      this.prisma.ajuste.findUnique({ where: { clave: CLAVES_BCP.cuenta } }),
+      this.prisma.ajuste.findUnique({ where: { clave: CLAVES_BCP.cci } }),
+      this.prisma.ajuste.findUnique({ where: { clave: CLAVES_WHATSAPP.numero } }),
+      this.prisma.ajuste.findUnique({ where: { clave: CLAVES_WHATSAPP.mensaje } }),
+      this.datosArchivo('hero'),
+      this.datosArchivo('login'),
+      this.datosArchivo('yape'),
+      this.datosArchivo('bases'),
+    ]);
+
+    return {
+      grupos,
+      bcp: {
+        titular: titular?.valor || '',
+        cuenta: cuenta?.valor || '',
+        cci: cci?.valor || '',
+      },
+      whatsapp: {
+        numero: waNumero?.valor || WHATSAPP_POR_DEFECTO.numero,
+        mensaje: waMensaje?.valor || WHATSAPP_POR_DEFECTO.mensaje,
+      },
+      inscripcionesCerradas: cierre?.valor === 'true',
+      cerradasEn: cierre?.valor === 'true' ? fecha?.valor || null : null,
+      // Los fondos y el QR viajan como una sola dirección, que es lo único que
+      // la portada necesita. El panel además recibe el detalle completo.
+      imagenHero: hero?.url || null,
+      imagenLogin: login?.url || null,
+      yapeQr: yape?.url || null,
+      archivos: { hero, login, yape, bases },
+      bases,
+    };
+  }
+
+  // --------------------------------------------------------------------
+  // Archivos administrados
+  // --------------------------------------------------------------------
+
+  /**
+   * Sube o reemplaza uno de los archivos. Si ya había uno, el anterior se
+   * borra de Cloudflare para que no se acumulen versiones sueltas.
+   */
+  async guardarArchivo(tipo: ArchivoAdministrado, archivo: Express.Multer.File) {
+    const conf = ARCHIVOS[tipo];
+    if (!archivo) throw new BadRequestException('Debe adjuntar el archivo');
+
+    const maximo = MAXIMOS[conf.formato];
+    if (archivo.size > maximo) {
+      throw new BadRequestException(`El archivo no debe pasar de ${maximo / 1024 / 1024} MB`);
+    }
+    this.validarContenido(conf.formato, archivo);
+
+    const anterior = await this.prisma.ajuste.findUnique({ where: { clave: conf.clave } });
+    const referencia = await this.almacenamiento.guardar(archivo, conf.carpeta);
+
+    await Promise.all([
+      this.guardar(conf.clave, referencia),
+      this.guardar(conf.clave + '_nombre', this.nombreLimpio(archivo.originalname, conf.formato)),
+      this.guardar(conf.clave + '_mime', archivo.mimetype || ''),
+      this.guardar(conf.clave + '_tamano', String(archivo.size)),
+      this.guardar(conf.clave + '_actualizado', new Date().toISOString()),
+    ]);
+
+    // El viejo se borra recién cuando el nuevo ya quedó registrado: si la
+    // subida falla, el que estaba publicado sigue en pie.
+    if (anterior?.valor && anterior.valor !== referencia) {
+      await this.almacenamiento.eliminar(anterior.valor);
+    }
+
+    return this.datosArchivo(tipo);
+  }
+
+  /** Quita el archivo de Cloudflare y de la base. */
+  async quitarArchivo(tipo: ArchivoAdministrado) {
+    const conf = ARCHIVOS[tipo];
+    const actual = await this.prisma.ajuste.findUnique({ where: { clave: conf.clave } });
+    if (!actual?.valor) throw new NotFoundException('No hay ningún archivo publicado');
+
+    await this.prisma.ajuste.deleteMany({
+      where: { clave: { in: [conf.clave, ...DATOS.map((s) => conf.clave + s)] } },
+    });
+    await this.almacenamiento.eliminar(actual.valor);
+
+    return null;
+  }
+
+  /** La referencia interna, solo para que el controlador entregue el archivo. */
+  async referenciaArchivo(tipo: ArchivoAdministrado) {
+    const conf = ARCHIVOS[tipo];
+    const [archivo, nombre, mime] = await Promise.all([
+      this.prisma.ajuste.findUnique({ where: { clave: conf.clave } }),
+      this.prisma.ajuste.findUnique({ where: { clave: conf.clave + '_nombre' } }),
+      this.prisma.ajuste.findUnique({ where: { clave: conf.clave + '_mime' } }),
+    ]);
+    if (!archivo?.valor) return null;
+
+    return {
+      referencia: archivo.valor,
+      nombre: nombre?.valor || (conf.formato === 'pdf' ? 'bases.pdf' : 'imagen'),
+      mime: mime?.valor || '',
+      formato: conf.formato as Formato,
+    };
+  }
+
+  /** Lo que sí puede ver el navegador: nunca la clave del archivo. */
+  private async datosArchivo(tipo: ArchivoAdministrado) {
+    const conf = ARCHIVOS[tipo];
+    const [archivo, nombre, tamano, fecha] = await Promise.all([
+      this.prisma.ajuste.findUnique({ where: { clave: conf.clave } }),
+      this.prisma.ajuste.findUnique({ where: { clave: conf.clave + '_nombre' } }),
+      this.prisma.ajuste.findUnique({ where: { clave: conf.clave + '_tamano' } }),
+      this.prisma.ajuste.findUnique({ where: { clave: conf.clave + '_actualizado' } }),
+    ]);
+    if (!archivo?.valor) return null;
+
+    // La dirección es siempre la misma, así que lleva la marca de tiempo: sin
+    // ella el navegador seguiría mostrando el archivo anterior tras cambiarlo.
+    const marca = fecha?.valor ? Date.parse(fecha.valor) : NaN;
+
+    return {
+      url: conf.url + (Number.isNaN(marca) ? '' : `?v=${marca}`),
+      nombre: nombre?.valor || '',
+      tamano: Number(tamano?.valor || 0),
+      actualizado: fecha?.valor || null,
+    };
+  }
+
+  /**
+   * El nombre puede mentir sobre el contenido: se revisan los primeros bytes,
+   * que es lo que de verdad distingue un PDF de un PNG disfrazado.
+   */
+  private validarContenido(formato: Formato, archivo: Express.Multer.File) {
+    const cabeza = archivo.buffer?.subarray(0, 12);
+    if (!cabeza?.length) throw new BadRequestException('El archivo llegó vacío');
+
+    if (formato === 'pdf') {
+      if (cabeza.subarray(0, 5).toString('latin1') !== '%PDF-') {
+        throw new BadRequestException('El archivo no es un PDF válido');
+      }
+      return;
+    }
+
+    const esJpg = cabeza[0] === 0xff && cabeza[1] === 0xd8 && cabeza[2] === 0xff;
+    const esPng = cabeza.subarray(0, 8).toString('latin1') === '\x89PNG\r\n\x1a\n';
+    const esWebp =
+      cabeza.subarray(0, 4).toString('latin1') === 'RIFF' &&
+      cabeza.subarray(8, 12).toString('latin1') === 'WEBP';
+
+    if (!esJpg && !esPng && !esWebp) {
+      throw new BadRequestException('El archivo no es una imagen JPG, PNG o WEBP');
+    }
+  }
+
+  /** Sin rutas ni caracteres raros: este nombre viaja en una cabecera HTTP. */
+  private nombreLimpio(original: string, formato: Formato) {
+    const porDefecto = formato === 'pdf' ? 'bases.pdf' : 'imagen.jpg';
+    const base = (original || porDefecto).split(/[\\/]/).pop() || porDefecto;
+    const limpio = base
+      .replace(/[^a-zA-Z0-9._ -]/g, '')
+      .trim()
+      .slice(0, 80);
+    if (!limpio) return porDefecto;
+    if (formato === 'pdf' && !limpio.toLowerCase().endsWith('.pdf')) return porDefecto;
+    return limpio;
+  }
+
+  // --------------------------------------------------------------------
+  // Resto de ajustes
+  // --------------------------------------------------------------------
+
+  /** Culmina o reabre el periodo de inscripciones para todos los tutores. */
+  async cambiarCierre(cerradas: boolean) {
+    await this.guardar(CLAVE_CIERRE, cerradas ? 'true' : 'false');
+    await this.guardar(CLAVE_CIERRE_FECHA, cerradas ? new Date().toISOString() : '');
+    return { inscripcionesCerradas: cerradas };
+  }
+
+  private async guardar(clave: string, valor: string) {
+    await this.prisma.ajuste.upsert({
+      where: { clave },
+      create: { clave, valor },
+      update: { valor },
+    });
+  }
+
+  async crearGrupo(datos: { nombre: string; enlace?: string }) {
+    const total = await this.prisma.grupoWhatsapp.count();
+    return this.prisma.grupoWhatsapp.create({
+      data: {
+        nombre: datos.nombre.trim(),
+        enlace: datos.enlace?.trim() || '',
+        orden: total,
+      },
+    });
+  }
+
+  async actualizarGrupo(id: string, datos: { nombre?: string; enlace?: string; lleno?: boolean }) {
+    const grupo = await this.prisma.grupoWhatsapp.findUnique({ where: { id } });
+    if (!grupo) throw new NotFoundException('Grupo no encontrado');
+
+    return this.prisma.grupoWhatsapp.update({
+      where: { id },
+      data: {
+        nombre: datos.nombre?.trim() ?? grupo.nombre,
+        enlace: datos.enlace !== undefined ? datos.enlace.trim() : grupo.enlace,
+        lleno: datos.lleno ?? grupo.lleno,
+      },
+    });
+  }
+
+  async eliminarGrupo(id: string) {
+    const grupo = await this.prisma.grupoWhatsapp.findUnique({ where: { id } });
+    if (!grupo) throw new NotFoundException('Grupo no encontrado');
+    await this.prisma.grupoWhatsapp.delete({ where: { id } });
+    return { ok: true };
+  }
+
+  /** Cuenta del BCP que se le muestra al tutor cuando elige pagar por banco. */
+  async guardarBcp(datos: { titular?: string; cuenta?: string; cci?: string }) {
+    const limpio = {
+      titular: (datos.titular || '').trim(),
+      cuenta: (datos.cuenta || '').trim(),
+      cci: (datos.cci || '').trim(),
+    };
+
+    await Promise.all([
+      this.guardar(CLAVES_BCP.titular, limpio.titular),
+      this.guardar(CLAVES_BCP.cuenta, limpio.cuenta),
+      this.guardar(CLAVES_BCP.cci, limpio.cci),
+    ]);
+
+    return { bcp: limpio };
+  }
+
+  /**
+   * Número y mensaje del botón flotante de WhatsApp.
+   *
+   * El número se guarda solo con dígitos: wa.me rechaza espacios, guiones y el
+   * «+». Si escriben los 9 dígitos del celular peruano se le antepone el 51,
+   * que es el error más fácil de cometer.
+   */
+  async guardarWhatsapp(datos: { numero?: string; mensaje?: string }) {
+    const soloDigitos = (datos.numero || '').replace(/\D/g, '');
+    const numero = /^9\d{8}$/.test(soloDigitos) ? `51${soloDigitos}` : soloDigitos;
+
+    if (numero.length < 8 || numero.length > 15) {
+      throw new BadRequestException(
+        'Escriba el número con código de país, por ejemplo 51928853577',
+      );
+    }
+
+    const mensaje = (datos.mensaje || '').trim();
+    if (!mensaje) throw new BadRequestException('Escriba el mensaje con el que abrirá el chat');
+    if (mensaje.length > 300) {
+      throw new BadRequestException('El mensaje no debe pasar de 300 caracteres');
+    }
+
+    await Promise.all([
+      this.guardar(CLAVES_WHATSAPP.numero, numero),
+      this.guardar(CLAVES_WHATSAPP.mensaje, mensaje),
+    ]);
+
+    return { whatsapp: { numero, mensaje } };
+  }
+}

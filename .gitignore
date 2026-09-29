@@ -1,0 +1,10 @@
+node_modules
+dist
+.env
+.env.*
+!.env.example
+# Este sí va al repositorio: solo tiene el dominio público del sitio, ningún
+# secreto, y sin él la compilación del servidor se queda sin la dirección de la
+# imagen que se ve al compartir el enlace.
+!frontend/.env.production
+backend/respaldos/
