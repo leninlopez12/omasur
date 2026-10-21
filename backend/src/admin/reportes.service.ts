@@ -3,8 +3,7 @@ import * as ExcelJS from 'exceljs';
 import { PrismaService } from '../prisma/prisma.service';
 import { GRADOS, etiquetaGrado } from '../common/grados';
 import { minimosDe, validarDelegacion } from '../common/reglas';
-
-const GRANATE = 'FF7B1E2B';
+import { escribirEncabezados, escribirTitulo, nombreArchivo } from '../common/excel';
 
 export interface FiltrosReporte {
   tipo?: 'estudiantes' | 'delegaciones';
@@ -122,90 +121,23 @@ export class ReportesService {
 
     // Cabecera del documento: el nombre del concurso, qué se está bajando y
     // con qué filtros. Sin esto, un Excel suelto no dice nada por sí mismo.
-    this.escribirTitulo(hoja, anchoTitulo, this.titulo(filtros), this.descripcion(filtros), filas.length);
+    escribirTitulo(hoja, anchoTitulo, this.titulo(filtros), this.descripcion(filtros), filas.length);
 
-    const filaEncabezados = hoja.addRow(columnas.map((c) => c.header));
-    filaEncabezados.font = { bold: true, color: { argb: 'FFFFFFFF' } };
-    filaEncabezados.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: GRANATE } };
-    filaEncabezados.alignment = { vertical: 'middle' };
-    filaEncabezados.height = 22;
-
-    hoja.columns = columnas.map((c, i) => ({
-      width: c.width,
-      key: String(i),
-    })) as any;
+    escribirEncabezados(hoja, columnas);
 
     for (const fila of filas) {
       hoja.addRow(columnas.map((c) => (fila as any)[c.key] ?? ''));
     }
-
-    // La fila de encabezados queda fija al desplazarse.
-    hoja.views = [{ state: 'frozen', ySplit: filaEncabezados.number }];
-    hoja.autoFilter = {
-      from: { row: filaEncabezados.number, column: 1 },
-      to: { row: filaEncabezados.number, column: anchoTitulo },
-    };
 
     return (await libro.xlsx.writeBuffer()) as unknown as Buffer;
   }
 
   /** Nombre de archivo legible, con la fecha. */
   nombreArchivo(filtros: FiltrosReporte) {
-    const base = this.titulo(filtros)
-      .toLowerCase()
-      .normalize('NFD')
-      .replace(/[̀-ͯ]/g, '')
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-|-$/g, '');
-    return `${base}-${new Date().toISOString().slice(0, 10)}.xlsx`;
+    return nombreArchivo(this.titulo(filtros));
   }
 
   // --------------------------------------------------------------------
-
-  private escribirTitulo(
-    hoja: ExcelJS.Worksheet,
-    ancho: number,
-    titulo: string,
-    descripcion: string,
-    total: number,
-  ) {
-    const fin = String.fromCharCode(64 + Math.min(ancho, 26));
-
-    hoja.mergeCells(`A1:${fin}1`);
-    const marca = hoja.getCell('A1');
-    marca.value = 'I - OMASUR UNI 2026';
-    marca.font = { bold: true, size: 18, color: { argb: GRANATE } };
-    marca.alignment = { horizontal: 'center', vertical: 'middle' };
-    hoja.getRow(1).height = 30;
-
-    hoja.mergeCells(`A2:${fin}2`);
-    const sub = hoja.getCell('A2');
-    sub.value = 'Olimpiada Macrorregional Sur de Matemática';
-    sub.font = { size: 11, color: { argb: 'FF6B7280' } };
-    sub.alignment = { horizontal: 'center' };
-
-    hoja.mergeCells(`A3:${fin}3`);
-    const nombre = hoja.getCell('A3');
-    nombre.value = titulo;
-    nombre.font = { bold: true, size: 14, color: { argb: 'FF111827' } };
-    nombre.alignment = { horizontal: 'center', vertical: 'middle' };
-    hoja.getRow(3).height = 24;
-
-    hoja.mergeCells(`A4:${fin}4`);
-    const detalle = hoja.getCell('A4');
-    detalle.value = descripcion;
-    detalle.font = { size: 10, color: { argb: 'FF6B7280' } };
-    detalle.alignment = { horizontal: 'center', wrapText: true };
-
-    hoja.mergeCells(`A5:${fin}5`);
-    const pie = hoja.getCell('A5');
-    const cuando = new Date().toLocaleString('es-PE', { timeZone: 'America/Lima' });
-    pie.value = `${total} ${total === 1 ? 'registro' : 'registros'} · Generado el ${cuando}`;
-    pie.font = { size: 10, italic: true, color: { argb: 'FF6B7280' } };
-    pie.alignment = { horizontal: 'center' };
-
-    hoja.addRow([]); // Una línea en blanco antes de la tabla.
-  }
 
   private columnasEstudiante() {
     return [

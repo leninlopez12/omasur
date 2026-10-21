@@ -20,6 +20,8 @@ import { SistemaService } from './sistema.service';
 import { AvisosService } from './avisos.service';
 import { FiltrosReporte, ReportesService } from './reportes.service';
 import { InscripcionesService } from './inscripciones.service';
+import { AbonosService, FiltrosAbonos } from './abonos.service';
+import { AlcanceConsolidado, ConsolidadoService } from './consolidado.service';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('ADMIN', 'SUPERVISOR')
@@ -32,6 +34,8 @@ export class AdminController {
     private avisos: AvisosService,
     private reportes: ReportesService,
     private tabla: InscripcionesService,
+    private abonos: AbonosService,
+    private consolidado: ConsolidadoService,
   ) {}
 
   @Get('metricas')
@@ -113,6 +117,57 @@ export class AdminController {
     @Query('buscar') buscar?: string,
   ) {
     return this.tabla.paraRevisar({ estado, nivel, grado, buscar });
+  }
+
+  // ------------------------------------------------------------------
+  // Abonos: el dinero visto por delegación, no por estudiante.
+  // ------------------------------------------------------------------
+
+  @Get('abonos')
+  resumenAbonos(@Query() filtros: FiltrosAbonos) {
+    return this.abonos.resumen(filtros);
+  }
+
+  @Get('abonos/excel')
+  async abonosExcel(@Query() filtros: FiltrosAbonos, @Res() res: Response) {
+    const buffer = await this.abonos.excel(filtros);
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    );
+    res.setHeader('Content-Disposition', 'attachment; filename="abonos-por-delegacion.xlsx"');
+    res.end(buffer);
+  }
+
+  // ------------------------------------------------------------------
+  // Consolidado para el día del examen: por categoría y por delegación.
+  // ------------------------------------------------------------------
+
+  @Get('consolidado')
+  verConsolidado(@Query('alcance') alcance?: string, @Query('categoria') categoria?: string) {
+    return this.consolidado.resumen(this.alcance(alcance), categoria);
+  }
+
+  @Get('consolidado/excel')
+  async consolidadoExcel(
+    @Query('alcance') alcance: string,
+    @Query('categoria') categoria: string,
+    @Res() res: Response,
+  ) {
+    const buffer = await this.consolidado.excel(this.alcance(alcance), categoria);
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    );
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${this.consolidado.nombreArchivo(categoria)}"`,
+    );
+    res.end(buffer);
+  }
+
+  private alcance(valor?: string): AlcanceConsolidado {
+    return valor === 'EN_PROCESO' ? 'EN_PROCESO' : 'APROBADOS';
   }
 
   @Get('reportes/opciones')

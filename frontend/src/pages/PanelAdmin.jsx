@@ -5,10 +5,13 @@ import {
   CalendarCheck,
   CheckCircle2,
   ClipboardCheck,
+  ClipboardList,
   Download,
   FileSpreadsheet,
   FileText,
   GraduationCap as IconoGrado,
+  IdCard,
+  Megaphone,
   ImageIcon,
   LayoutDashboard,
   Mail,
@@ -21,6 +24,7 @@ import {
   Settings,
   UserCog,
   Users,
+  Wallet,
 } from 'lucide-react';
 import PanelLayout from '../layouts/PanelLayout.jsx';
 import { Boton, Cargando, Etiqueta, Tarjeta } from '../components/Ui.jsx';
@@ -52,12 +56,17 @@ import RevisarAlumnos from '../components/RevisarAlumnos.jsx';
 import Supervisores from '../components/Supervisores.jsx';
 import Avisos from '../components/Avisos.jsx';
 import Reportes from '../components/Reportes.jsx';
+import Abonos from '../components/Abonos.jsx';
+import Consolidado from '../components/Consolidado.jsx';
+import EtapasCredencial from '../components/EtapasCredencial.jsx';
+import Comunicados from '../components/Comunicados.jsx';
 
 const SECCIONES = [
   { id: 'tablero', texto: 'Tablero', icono: LayoutDashboard },
   { id: 'revisar-alumnos', texto: 'Inscripciones', icono: ReceiptText },
   { id: 'inscripciones', texto: 'Delegaciones', icono: ClipboardCheck },
   { id: 'reportes', texto: 'Reportes', icono: FileSpreadsheet },
+  { id: 'abonos', texto: 'Abonos', icono: Wallet },
   {
     id: 'consultas',
     texto: 'Consultas',
@@ -67,6 +76,9 @@ const SECCIONES = [
       { id: 'consulta-estudiantes', texto: 'Estudiantes', icono: IconoGrado },
     ],
   },
+  { id: 'consolidado', texto: 'Consolidado', icono: ClipboardList },
+  { id: 'credenciales', texto: 'Credenciales', icono: IdCard },
+  { id: 'comunicados', texto: 'Comunicados', icono: Megaphone },
   {
     id: 'ajustes',
     texto: 'Ajustes',
@@ -90,8 +102,12 @@ const TITULOS = {
   'revisar-alumnos': 'Inscripciones por alumno',
   inscripciones: 'Delegaciones',
   reportes: 'Reportes',
+  abonos: 'Abonos por delegación',
   'consulta-tutores': 'Consultas · Tutores',
   'consulta-estudiantes': 'Consultas · Estudiantes',
+  consolidado: 'Consolidado general',
+  credenciales: 'Credenciales',
+  comunicados: 'Comunicados',
   'ajustes-inscripciones': 'Ajustes · Inscripciones',
   'ajustes-whatsapp': 'Ajustes · Grupo WhatsApp',
   'ajustes-boton-wa': 'Ajustes · Botón de WhatsApp',
@@ -165,9 +181,13 @@ function Contenido() {
           <RevisarAlumnos alAbrirTutor={setDetalleId} />
         ))}
       {seccion === 'reportes' && <Reportes />}
+      {seccion === 'abonos' && <Abonos />}
 
       {seccion === 'consulta-tutores' && <ConsultaTutores alAbrirTutor={abrirTutor} />}
       {seccion === 'consulta-estudiantes' && <ConsultaEstudiantes />}
+      {seccion === 'consolidado' && <Consolidado />}
+      {seccion === 'credenciales' && <EtapasCredencial />}
+      {seccion === 'comunicados' && <Comunicados />}
 
       {seccion === 'ajustes-inscripciones' && (
         <CierreInscripciones
@@ -180,7 +200,7 @@ function Contenido() {
         <GruposWhatsApp grupos={ajustes.grupos} alCambiar={recargarAjustes} />
       )}
       {seccion === 'ajustes-yape' && (
-        <AjusteYape yapeQr={ajustes.yapeQr} alCambiar={recargarAjustes} />
+        <AjusteYape yapeQr={ajustes.yapeQr} yape={ajustes.yape} alCambiar={recargarAjustes} />
       )}
       {seccion === 'ajustes-boton-wa' && (
         <AjusteWhatsapp whatsapp={ajustes.whatsapp} alCambiar={recargarAjustes} />

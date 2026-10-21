@@ -13,7 +13,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import { api, mensajeError } from '../lib/api';
-import { CONTACTO, ETIQUETA_GRADO, GRADOS } from '../lib/datos';
+import { ETIQUETA_GRADO, GRADOS } from '../lib/datos';
 import { useAjustes } from '../lib/ajustes';
 import QrYape from './QrYape.jsx';
 import { Aviso, Boton, Etiqueta, Tarjeta } from './Ui.jsx';
@@ -516,7 +516,7 @@ function PantallaComprobante({ elegidos, total, alVolver, alEnviar }) {
   const [exito, setExito] = useState('');
   const [enviando, setEnviando] = useState(false);
   const archivoRef = useRef(null);
-  const { ajustes, qrYape } = useAjustes();
+  const { ajustes, qrYape, yape } = useAjustes();
 
   const elegirArchivo = (evento) => {
     const seleccionado = evento.target.files?.[0];
@@ -570,7 +570,7 @@ function PantallaComprobante({ elegidos, total, alVolver, alEnviar }) {
             activo={metodo === 'YAPE'}
             alElegir={() => setMetodo('YAPE')}
             metodo="YAPE"
-            detalle={CONTACTO.yape}
+            detalle={yape.numero}
           />
           <OpcionMetodo
             activo={metodo === 'BCP'}
@@ -581,7 +581,11 @@ function PantallaComprobante({ elegidos, total, alVolver, alEnviar }) {
         </div>
 
         <div className="mt-8">
-          {metodo === 'YAPE' ? <DatosYape qr={qrYape} /> : <DatosBcp bcp={ajustes.bcp} />}
+          {metodo === 'YAPE' ? (
+            <DatosYape qr={qrYape} datos={yape} />
+          ) : (
+            <DatosBcp bcp={ajustes.bcp} />
+          )}
         </div>
       </Tarjeta>
 
@@ -684,7 +688,7 @@ function nombreQr(qr = '') {
   return 'qr-yape-omasur' + ext.toLowerCase();
 }
 
-function DatosYape({ qr }) {
+function DatosYape({ qr, datos }) {
   return (
     <div className="rounded-3xl bg-gradient-to-br from-yape-500 via-yape-600 to-yape-800 p-8 text-white">
       <div className="flex items-start justify-between gap-4">
@@ -700,8 +704,8 @@ function DatosYape({ qr }) {
           <Download className="h-7 w-7" />
         </a>
       </div>
-      <p className="mt-5 text-xl text-yape-100">{CONTACTO.titular}</p>
-      <p className="mt-3 text-5xl font-black tracking-tight">{CONTACTO.yape}</p>
+      <p className="mt-5 text-xl text-yape-100">{datos.titular}</p>
+      <p className="mt-3 text-5xl font-black tracking-tight">{datos.numero}</p>
       <QrYape src={qr} className="mx-auto mt-8 w-full max-w-[15rem]" />
     </div>
   );

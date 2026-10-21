@@ -2,9 +2,13 @@ import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/commo
 import PDFDocument = require('pdfkit');
 import { PrismaService } from '../prisma/prisma.service';
 import { etiquetaGrado } from '../common/grados';
+import { Etapa, EtapasService } from './etapas.service';
+import { StorageService } from '../storage/storage.service';
 
 const GRANATE = '#7B1E2B';
 const GRANATE_OSCURO = '#5A121C';
+const GRANATE_CLARO = '#C98A95';
+const CREMA = '#FBEEF0';
 const BLANCO = '#FFFFFF';
 const GRIS = '#6B7280';
 
@@ -18,7 +22,11 @@ type AlumnoConTutor = {
 
 @Injectable()
 export class CredentialsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private etapas: EtapasService,
+    private almacenamiento: StorageService,
+  ) {}
 
   /**
    * Consulta pública. Solo devuelve los datos del estudiante cuando la comisión
@@ -47,7 +55,7 @@ export class CredentialsService {
     };
   }
 
-  async credencialPorDni(dni: string): Promise<Buffer> {
+  async credencialPorDni(dni: string, etapa?: string): Promise<Buffer> {
     const alumno = await this.prisma.student.findUnique({
       where: { dni: dni.trim() },
       include: { tutor: true },
@@ -61,7 +69,10 @@ export class CredentialsService {
     if (!alumno.paymentId) {
       throw new ForbiddenException('Este estudiante todavía no tiene su inscripción aprobada');
     }
-    return this.construirPdf([alumno as unknown as AlumnoConTutor]);
+    return this.construirPdf(
+      [alumno as unknown as AlumnoConTutor],
+      await this.etapas.paraImprimir(etapa),
+    );
   }
 
   /**
@@ -71,7 +82,7 @@ export class CredentialsService {
    */
   async credencialesDelTutor(
     tutorId: string,
-    filtros: { nivel?: string; grado?: string } = {},
+    filtros: { nivel?: string; grado?: string; etapa?: string } = {},
   ): Promise<Buffer> {
     const tutor = await this.prisma.tutor.findUnique({ where: { id: tutorId } });
     if (!tutor) throw new NotFoundException('Tutor no encontrado');
@@ -92,11 +103,40 @@ export class CredentialsService {
     }
 
     const alumnos = students.map((a) => ({ ...a, tutor })) as unknown as AlumnoConTutor[];
-    return this.construirPdf(alumnos);
+    return this.construirPdf(alumnos, await this.etapas.paraImprimir(filtros.etapa));
+  }
+
+  /**
+   * Una credencial de muestra con datos de ejemplo.
+   *
+   * Permite ver cómo quedó el diseño antes de publicar la etapa, incluso
+   * cuando todavía no hay ningún alumno aprobado.
+   */
+  async muestra(clave: string): Promise<Buffer> {
+    const etapa = this.etapas.esClave(clave)
+      ? await this.etapas.una(clave)
+      : await this.etapas.una('INSTITUCIONAL');
+
+    const ejemplo = {
+      dni: '12345678',
+      nombres: 'NOMBRE DEL ESTUDIANTE',
+      categoria: 'A',
+      grado: 'TERCERO_PRIMARIA',
+      tutor: {
+        institucion: 'INSTITUCIÓN EDUCATIVA DE EJEMPLO',
+        modalidad: 'ESTATAL',
+        region: 'Puno',
+        provincia: 'San Román',
+      },
+    } as unknown as AlumnoConTutor;
+
+    return this.construirPdf([ejemplo, ejemplo], etapa);
   }
 
   /** Dos credenciales por página A4, listas para recortar. */
-  private construirPdf(alumnos: AlumnoConTutor[]): Promise<Buffer> {
+  private async construirPdf(alumnos: AlumnoConTutor[], etapa: Etapa): Promise<Buffer> {
+    const logo = await this.logo();
+
     return new Promise((resolve, reject) => {
       const doc = new PDFDocument({ size: 'A4', margin: 0 });
       const partes: Buffer[] = [];
@@ -107,71 +147,200 @@ export class CredentialsService {
       alumnos.forEach((alumno, i) => {
         const posicion = i % 2;
         if (i > 0 && posicion === 0) doc.addPage();
-        this.dibujarCredencial(doc, alumno, posicion === 0 ? 40 : 430);
+        this.dibujarCredencial(doc, alumno, etapa, logo, posicion === 0 ? 40 : 440);
       });
 
       doc.end();
     });
   }
 
-  private dibujarCredencial(doc: PDFKit.PDFDocument, alumno: AlumnoConTutor, y: number) {
+  /**
+   * El logo que la comisión subió a Cloudflare, si lo hay.
+   *
+   * Se lee una vez por documento y no una por credencial: con doscientos
+   * alumnos serían doscientas descargas del mismo archivo.
+   */
+  private async logo(): Promise<Buffer | null> {
+    const fila = await this.prisma.ajuste.findUnique({ where: { clave: 'credencial_logo' } });
+    if (!fila?.valor) return null;
+
+    try {
+      const archivo = await this.almacenamiento.leer(fila.valor);
+      if (!archivo) return null;
+
+      const trozos: Buffer[] = [];
+      for await (const trozo of archivo.cuerpo) trozos.push(trozo as Buffer);
+      return Buffer.concat(trozos);
+    } catch {
+      // Sin logo la credencial sale igual: no vale la pena fallar por esto.
+      return null;
+    }
+  }
+
+  /**
+   * Una credencial.
+   *
+   * El marco es doble —una línea granate gruesa por fuera y una fina por
+   * dentro— porque es lo que la hace leerse como credencial y no como una
+   * ficha cualquiera, y porque marca por dónde recortar.
+   *
+   * Los campos fluyen de arriba abajo: el que quede vacío no se dibuja, y con
+   * él desaparece su título. Dejar el rótulo solo, sin dato debajo, se veía
+   * como un error de impresión.
+   */
+  private dibujarCredencial(
+    doc: PDFKit.PDFDocument,
+    alumno: AlumnoConTutor,
+    etapa: Etapa,
+    logo: Buffer | null,
+    y: number,
+  ) {
     const x = 50;
     const ancho = 495;
-    const alto = 340;
+    const alto = 360;
 
     doc.save();
-    doc.roundedRect(x, y, ancho, alto, 16).fill(BLANCO).stroke();
-    doc.roundedRect(x, y, ancho, alto, 16).lineWidth(1.5).stroke('#E5E7EB');
 
-    // Cabecera granate
+    doc.roundedRect(x, y, ancho, alto, 14).fill(BLANCO);
+    doc.roundedRect(x + 2, y + 2, ancho - 4, alto - 4, 12).lineWidth(3).stroke(GRANATE);
+    doc.roundedRect(x + 9, y + 9, ancho - 18, alto - 18, 8).lineWidth(0.8).stroke(GRANATE_CLARO);
+
+    const bx = x + 9;
+    const banda = ancho - 18;
+
     doc.save();
-    doc.roundedRect(x, y, ancho, 86, 16).fill(GRANATE);
-    doc.rect(x, y + 60, ancho, 26).fill(GRANATE);
+    doc.roundedRect(bx, y + 9, banda, 80, 8).fill(GRANATE);
+    doc.rect(bx, y + 55, banda, 34).fill(GRANATE);
     doc.restore();
 
-    doc.fillColor(BLANCO).font('Helvetica-Bold').fontSize(19);
-    doc.text('I - OMASUR UNI 2026', x + 24, y + 22, { width: ancho - 48 });
-    doc.font('Helvetica').fontSize(9.5).fillColor('#F3D9DD');
-    doc.text('Olimpiada Macrorregional Sur de Matemática', x + 24, y + 48, { width: ancho - 48 });
-    doc.text('IES Ingenieritos del Perú "Eduardo de Habich"', x + 24, y + 62, { width: ancho - 48 });
+    // Con logo, los textos de la cabecera dejan su sitio a la derecha.
+    const ladoLogo = 56;
+    const margenTexto = logo ? ladoLogo + 26 : 16;
 
-    // El DNI es el identificador del estudiante: no se usa ningún código aparte.
-    doc.roundedRect(x + 24, y + 106, 200, 46, 8).fill('#FBEEF0');
-    doc.fillColor(GRIS).font('Helvetica').fontSize(8);
-    doc.text('DNI DEL ESTUDIANTE', x + 34, y + 114);
-    doc.fillColor(GRANATE_OSCURO).font('Helvetica-Bold').fontSize(18);
-    doc.text(alumno.dni, x + 34, y + 128);
+    if (logo) {
+      try {
+        doc.image(logo, bx + banda - ladoLogo - 14, y + 20, {
+          fit: [ladoLogo, ladoLogo],
+          align: 'center',
+          valign: 'center',
+        });
+      } catch {
+        // Una imagen que PDFKit no sepa leer no puede tumbar la credencial.
+      }
+    }
 
-    // Categoría
-    doc.roundedRect(x + 240, y + 106, 100, 46, 8).fill('#FBEEF0');
-    doc.fillColor(GRIS).font('Helvetica').fontSize(8);
-    doc.text('CATEGORÍA', x + 250, y + 114);
-    doc.fillColor(GRANATE_OSCURO).font('Helvetica-Bold').fontSize(18);
-    doc.text('CAT. ' + alumno.categoria, x + 250, y + 128);
+    const anchoTexto = banda - margenTexto * 2;
+    doc.fillColor(BLANCO).font('Helvetica-Bold').fontSize(17);
+    doc.text(etapa.titulo, bx + margenTexto, y + 23, { width: anchoTexto, align: 'center' });
+    doc.font('Helvetica').fontSize(8.5).fillColor('#F3D9DD');
+    if (etapa.subtitulo) {
+      doc.text(etapa.subtitulo, bx + margenTexto, y + 45, { width: anchoTexto, align: 'center' });
+    }
+    if (etapa.organizador) {
+      doc.text(etapa.organizador, bx + margenTexto, y + 58, {
+        width: anchoTexto,
+        align: 'center',
+      });
+    }
 
-    this.campo(doc, x + 24, y + 172, 'ESTUDIANTE', alumno.nombres, ancho - 48);
-    this.campo(doc, x + 24, y + 214, 'GRADO', etiquetaGrado(alumno.grado as any), ancho - 48);
-    this.campo(doc, x + 24, y + 256, 'INSTITUCIÓN EDUCATIVA', alumno.tutor.institucion, ancho - 48);
+    if (etapa.etiqueta) {
+      const anchoEtapa = 206;
+      const xEtapa = x + (ancho - anchoEtapa) / 2;
+      doc.roundedRect(xEtapa, y + 78, anchoEtapa, 22, 11).fill(BLANCO);
+      doc.roundedRect(xEtapa, y + 78, anchoEtapa, 22, 11).lineWidth(1.2).stroke(GRANATE);
+      doc.fillColor(GRANATE_OSCURO).font('Helvetica-Bold').fontSize(9);
+      doc.text(etapa.etiqueta, xEtapa, y + 85, { width: anchoEtapa, align: 'center' });
+    }
 
-    doc.moveTo(x + 24, y + alto - 44).lineTo(x + ancho - 24, y + alto - 44).lineWidth(0.8).stroke('#E5E7EB');
-    doc.fillColor(GRIS).font('Helvetica').fontSize(8);
-    doc.text(
-      'Presentar junto con el DNI. Portar lápiz 2B, borrador y tajador.',
-      x + 24,
-      y + alto - 34,
-      { width: ancho - 48 },
-    );
-    doc.text('Primera etapa: 22 de octubre  ·  Segunda etapa: 08 de noviembre', x + 24, y + alto - 22, {
-      width: ancho - 48,
+    // Los recuadros de arriba. El DNI y la categoría son del estudiante y
+    // siempre están; la fecha la pone la comisión y puede faltar.
+    const cajas: { titulo: string; valor: string; tamano: number }[] = [
+      { titulo: 'DNI DEL ESTUDIANTE', valor: alumno.dni, tamano: 17 },
+      { titulo: 'CATEGORÍA', valor: 'CAT. ' + alumno.categoria, tamano: 17 },
+    ];
+    if (etapa.fecha) cajas.push({ titulo: 'FECHA', valor: etapa.fecha, tamano: 9 });
+
+    const anchos = cajas.length === 3 ? [196, 96, 127] : [238, 205];
+    let cx = x + 26;
+    cajas.forEach((caja, i) => {
+      doc.roundedRect(cx, y + 112, anchos[i], 44, 8).fill(CREMA);
+      doc.fillColor(GRIS).font('Helvetica').fontSize(7.5);
+      doc.text(caja.titulo, cx + 10, y + 120);
+      doc.fillColor(GRANATE_OSCURO).font('Helvetica-Bold').fontSize(caja.tamano);
+      doc.text(caja.valor, cx + 10, y + (caja.tamano > 12 ? 133 : 135), {
+        width: anchos[i] - 18,
+        ellipsis: true,
+        lineBreak: false,
+      });
+      cx += anchos[i] + 12;
     });
+
+    // De aquí para abajo el cursor solo avanza cuando algo se dibuja.
+    let cursor = y + 168;
+    const salto = 38;
+
+    cursor = this.campo(doc, x + 26, cursor, 'ESTUDIANTE', alumno.nombres, ancho - 52, salto);
+
+    const grado = etiquetaGrado(alumno.grado as any);
+    if (etapa.hora) {
+      this.campo(doc, x + 26, cursor, 'GRADO', grado, 210, 0);
+      cursor = this.campo(doc, x + 254, cursor, 'HORA DE INGRESO', etapa.hora, 215, salto);
+    } else {
+      cursor = this.campo(doc, x + 26, cursor, 'GRADO', grado, ancho - 52, salto);
+    }
+
+    cursor = this.campo(
+      doc,
+      x + 26,
+      cursor,
+      'INSTITUCIÓN EDUCATIVA',
+      alumno.tutor.institucion,
+      ancho - 52,
+      salto,
+    );
+    cursor = this.campo(doc, x + 26, cursor, 'LUGAR', etapa.lugar, ancho - 52, salto);
+
+    // El pie solo si hay algo que escribir: si no, ni la línea.
+    if (etapa.indicaciones || etapa.pie) {
+      doc
+        .moveTo(x + 26, y + 316)
+        .lineTo(x + ancho - 26, y + 316)
+        .lineWidth(0.8)
+        .stroke(GRANATE_CLARO);
+
+      if (etapa.indicaciones) {
+        doc.fillColor(GRIS).font('Helvetica').fontSize(7.5);
+        doc.text(etapa.indicaciones, x + 26, y + 323, { width: ancho - 52 });
+      }
+      if (etapa.pie) {
+        doc.fillColor(GRIS).font('Helvetica-Oblique').fontSize(7);
+        doc.text(etapa.pie, x + 26, y + 344, { width: ancho - 52 });
+      }
+    }
 
     doc.restore();
   }
 
-  private campo(doc: PDFKit.PDFDocument, x: number, y: number, etiqueta: string, valor: string, ancho: number) {
-    doc.fillColor(GRIS).font('Helvetica').fontSize(8);
+  /**
+   * Un rótulo con su dato. Sin dato no se dibuja nada —ni el rótulo— y el
+   * cursor no avanza, así que el siguiente campo ocupa su lugar.
+   */
+  private campo(
+    doc: PDFKit.PDFDocument,
+    x: number,
+    y: number,
+    etiqueta: string,
+    valor: string,
+    ancho: number,
+    salto: number,
+  ) {
+    if (!valor?.trim()) return y;
+
+    doc.fillColor(GRIS).font('Helvetica').fontSize(7.5);
     doc.text(etiqueta, x, y);
-    doc.fillColor('#111827').font('Helvetica-Bold').fontSize(13);
-    doc.text(valor, x, y + 12, { width: ancho, ellipsis: true, lineBreak: false });
+    doc.fillColor('#111827').font('Helvetica-Bold').fontSize(12.5);
+    doc.text(valor, x, y + 11, { width: ancho, ellipsis: true, lineBreak: false });
+
+    return y + salto;
   }
 }

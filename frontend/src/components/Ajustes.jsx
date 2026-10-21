@@ -430,7 +430,7 @@ function FilaGrupo({ grupo, alCambiar }) {
 }
 
 /** Ajustes > Yape */
-export function AjusteYape({ yapeQr, alCambiar }) {
+export function AjusteYape({ yapeQr, yape, alCambiar }) {
   const [archivo, setArchivo] = useState(null);
   const [vista, setVista] = useState('');
   const [error, setError] = useState('');
@@ -498,6 +498,11 @@ export function AjusteYape({ yapeQr, alCambiar }) {
           etiqueta={yapeQr ? 'Subido por la comisión' : 'Imagen por defecto'}
           compacto
         />
+
+        <div className="mt-6 rounded-2xl bg-slate-50 p-4 text-center">
+          <p className="text-base text-slate-600">{yape?.titular || '—'}</p>
+          <p className="mt-1 text-2xl font-black text-slate-900">{yape?.numero || '—'}</p>
+        </div>
       </Tarjeta>
 
       <Tarjeta className="p-6">
@@ -563,7 +568,86 @@ export function AjusteYape({ yapeQr, alCambiar }) {
           </div>
         </form>
       </Tarjeta>
+
+      <div className="xl:col-span-2">
+        <DatosDeYape yape={yape} alCambiar={alCambiar} />
+      </div>
     </div>
+  );
+}
+
+/**
+ * Titular y número de la cuenta Yape.
+ *
+ * Van aparte del QR porque se cambian por motivos distintos: la foto, cuando
+ * Yape la regenera; el nombre y el número, cuando cambia quién recauda.
+ */
+function DatosDeYape({ yape, alCambiar }) {
+  const [datos, setDatos] = useState({
+    titular: yape?.titular || '',
+    numero: yape?.numero || '',
+  });
+  const [error, setError] = useState('');
+  const [mensaje, setMensaje] = useState('');
+  const [guardando, setGuardando] = useState(false);
+
+  const cambiar = (campo) => (evento) => setDatos({ ...datos, [campo]: evento.target.value });
+
+  const guardar = async (evento) => {
+    evento.preventDefault();
+    setError('');
+    setMensaje('');
+    setGuardando(true);
+    try {
+      await api.post('/ajustes/yape/datos', datos);
+      setMensaje('Datos de la cuenta actualizados');
+      await alCambiar();
+    } catch (e) {
+      setError(mensajeError(e, 'No se pudieron guardar los datos'));
+    } finally {
+      setGuardando(false);
+    }
+  };
+
+  return (
+    <Tarjeta className="p-6">
+      <h3 className="text-xl font-black text-slate-900">Datos de la cuenta</h3>
+      <p className="mt-2 text-base text-slate-600">
+        Aparecen junto al QR cuando el tutor elige pagar por Yape.
+      </p>
+
+      <form onSubmit={guardar} className="mt-6 space-y-5">
+        <div className="grid gap-5 sm:grid-cols-2">
+          <Campo
+            etiqueta="Titular de la cuenta"
+            placeholder="Nombre como figura en Yape"
+            value={datos.titular}
+            onChange={cambiar('titular')}
+          />
+          <Campo
+            etiqueta="Número de Yape"
+            placeholder="928 853 577"
+            value={datos.numero}
+            onChange={cambiar('numero')}
+          />
+        </div>
+
+        {error && (
+          <Aviso tipo="error" icono={AlertCircle} compacto>
+            {error}
+          </Aviso>
+        )}
+        {mensaje && (
+          <Aviso tipo="exito" icono={CheckCircle2} compacto>
+            {mensaje}
+          </Aviso>
+        )}
+
+        <Boton type="submit" cargando={guardando} tamano="chico">
+          Guardar datos
+        </Boton>
+      </form>
+    </Tarjeta>
   );
 }
 

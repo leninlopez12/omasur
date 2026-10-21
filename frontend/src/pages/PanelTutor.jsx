@@ -544,6 +544,9 @@ function SeccionCredenciales({ resumen }) {
   const [pagina, setPagina] = useState(1);
   const [descargando, setDescargando] = useState('');
   const [error, setError] = useState('');
+  // Las etapas que la comisión ya publicó: puede haber una, las dos o ninguna.
+  const [etapas, setEtapas] = useState(null);
+  const [etapa, setEtapa] = useState('');
   const habilitado = resumen.estado === 'APROBADA';
 
   useEffect(() => {
@@ -552,6 +555,14 @@ function SeccionCredenciales({ resumen }) {
       .get('/tutores/inscripciones')
       .then(({ data }) => setFilas(data.filas.filter((f) => f.estadoInscripcion === 'APROBADA')))
       .catch(() => setFilas([]));
+    api
+      .get('/credenciales/etapas')
+      .then(({ data }) => {
+        setEtapas(data);
+        // La última publicada es la que está por rendirse.
+        if (data.length) setEtapa(data[data.length - 1].clave);
+      })
+      .catch(() => setEtapas([]));
   }, [habilitado]);
 
   if (!habilitado) {
@@ -569,7 +580,21 @@ function SeccionCredenciales({ resumen }) {
     );
   }
 
-  if (!filas) return <Cargando texto="Cargando su delegación" />;
+  if (!filas || !etapas) return <Cargando texto="Cargando su delegación" />;
+
+  if (etapas.length === 0) {
+    return (
+      <Tarjeta>
+        <IdCard className="h-14 w-14 text-granate-600" />
+        <h3 className="mt-6 text-3xl font-black text-slate-900">Credenciales</h3>
+        <div className="mt-6">
+          <Aviso tipo="alerta" icono={AlertCircle} titulo="Todavía no están publicadas">
+            La comisión las habilita antes de cada etapa. Le avisaremos en su panel.
+          </Aviso>
+        </div>
+      </Tarjeta>
+    );
+  }
 
   const texto = buscar.trim().toLowerCase();
   const visibles = filas.filter((f) => {
@@ -589,11 +614,13 @@ function SeccionCredenciales({ resumen }) {
     setError('');
     setDescargando('filtradas');
     try {
-      const params = new URLSearchParams();
+      const params = new URLSearchParams({ etapa });
       if (nivel) params.set('nivel', nivel);
       if (grado) params.set('grado', grado);
-      const cola = params.toString() ? '?' + params.toString() : '';
-      await descargar('/credenciales/delegacion' + cola, 'credenciales-omasur-2026.pdf');
+      await descargar(
+        '/credenciales/delegacion?' + params.toString(),
+        'credenciales-omasur-2026.pdf',
+      );
     } catch {
       setError('No se pudieron generar esas credenciales');
     } finally {
@@ -605,7 +632,10 @@ function SeccionCredenciales({ resumen }) {
     setError('');
     setDescargando(fila.id);
     try {
-      await descargar('/credenciales/dni/' + fila.dni, 'credencial-' + fila.dni + '.pdf');
+      await descargar(
+        '/credenciales/dni/' + fila.dni + '?etapa=' + etapa,
+        'credencial-' + fila.dni + '.pdf',
+      );
     } catch {
       setError('No se pudo generar la credencial de ' + fila.nombres);
     } finally {
@@ -623,6 +653,26 @@ function SeccionCredenciales({ resumen }) {
         <p className="mt-3 text-xl text-slate-600">
           Solo los estudiantes con inscripción aprobada.
         </p>
+
+        {etapas.length > 1 ? (
+          <div className="mt-8 max-w-md">
+            <Selector
+              etiqueta="Etapa"
+              value={etapa}
+              onChange={(e) => setEtapa(e.target.value)}
+            >
+              {etapas.map((e) => (
+                <option key={e.clave} value={e.clave}>
+                  {e.etiqueta} · {e.fecha}
+                </option>
+              ))}
+            </Selector>
+          </div>
+        ) : (
+          <p className="mt-4 text-xl font-semibold text-granate-700">
+            {etapas[0].etiqueta} · {etapas[0].fecha}
+          </p>
+        )}
 
         <div className="mt-8 grid gap-4 md:grid-cols-3">
           <label className="block">

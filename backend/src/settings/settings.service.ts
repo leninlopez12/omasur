@@ -23,6 +23,48 @@ const WHATSAPP_POR_DEFECTO = {
   mensaje: 'Hola, quiero información sobre el I OMASUR UNI 2026',
 };
 
+/** Titular y número de la cuenta Yape, que se muestran junto al QR. */
+const CLAVES_YAPE = {
+  numero: 'yape_numero',
+  titular: 'yape_titular',
+} as const;
+
+/** Los que trae el sistema hasta que la comisión los cambie. */
+const YAPE_POR_DEFECTO = {
+  numero: '928 853 577',
+  titular: 'Jhon Arnaldo Mamani Coaquira',
+};
+
+/**
+ * El comunicado que se abre sobre la portada. Una sola fila con su JSON: es un
+ * registro que se lee y se escribe entero.
+ */
+const CLAVE_COMUNICADO = 'comunicado';
+
+export const ESTILOS_COMUNICADO = ['AVISO', 'IMPORTANTE', 'CELEBRACION', 'SOBRIO'] as const;
+export type EstiloComunicado = (typeof ESTILOS_COMUNICADO)[number];
+
+export interface Comunicado {
+  titulo: string;
+  descripcion: string;
+  firma: string;
+  estilo: EstiloComunicado;
+  publicado: boolean;
+  /** Cambia en cada guardado: con él, a quien ya lo cerró se le vuelve a abrir. */
+  actualizado: string;
+}
+
+const COMUNICADO_VACIO: Comunicado = {
+  titulo: '',
+  descripcion: '',
+  firma: 'Atte.: Comisión Organizadora',
+  estilo: 'AVISO',
+  publicado: false,
+  actualizado: '',
+};
+
+const LARGOS_COMUNICADO = { titulo: 90, descripcion: 1200, firma: 80 };
+
 export const CLAVE_CIERRE = 'inscripciones_cerradas';
 const CLAVE_CIERRE_FECHA = 'inscripciones_cerradas_en';
 
@@ -59,6 +101,13 @@ const ARCHIVOS = {
     url: '/api/ajustes/bases',
     formato: 'pdf',
   },
+  // Va impreso en la credencial, a la derecha de la cabecera.
+  credencial: {
+    clave: 'credencial_logo',
+    carpeta: 'publico/credencial',
+    url: '/api/ajustes/credencial',
+    formato: 'imagen',
+  },
 } as const;
 
 export type ArchivoAdministrado = keyof typeof ARCHIVOS;
@@ -93,10 +142,14 @@ export class SettingsService {
       cci,
       waNumero,
       waMensaje,
+      yapeNumero,
+      yapeTitular,
       hero,
       login,
       yape,
       bases,
+      logoCredencial,
+      comunicado,
     ] = await Promise.all([
       this.prisma.grupoWhatsapp.findMany({ orderBy: [{ orden: 'asc' }, { createdAt: 'asc' }] }),
       this.prisma.ajuste.findUnique({ where: { clave: CLAVE_CIERRE } }),
@@ -106,10 +159,14 @@ export class SettingsService {
       this.prisma.ajuste.findUnique({ where: { clave: CLAVES_BCP.cci } }),
       this.prisma.ajuste.findUnique({ where: { clave: CLAVES_WHATSAPP.numero } }),
       this.prisma.ajuste.findUnique({ where: { clave: CLAVES_WHATSAPP.mensaje } }),
+      this.prisma.ajuste.findUnique({ where: { clave: CLAVES_YAPE.numero } }),
+      this.prisma.ajuste.findUnique({ where: { clave: CLAVES_YAPE.titular } }),
       this.datosArchivo('hero'),
       this.datosArchivo('login'),
       this.datosArchivo('yape'),
       this.datosArchivo('bases'),
+      this.datosArchivo('credencial'),
+      this.comunicado(),
     ]);
 
     return {
@@ -130,7 +187,13 @@ export class SettingsService {
       imagenHero: hero?.url || null,
       imagenLogin: login?.url || null,
       yapeQr: yape?.url || null,
-      archivos: { hero, login, yape, bases },
+      yape: {
+        numero: yapeNumero?.valor || YAPE_POR_DEFECTO.numero,
+        titular: yapeTitular?.valor || YAPE_POR_DEFECTO.titular,
+      },
+      archivos: { hero, login, yape, bases, credencial: logoCredencial },
+      // Solo si está publicado: un borrador no tiene por qué salir al público.
+      comunicado: comunicado.publicado && comunicado.titulo ? comunicado : null,
       bases,
     };
   }
@@ -333,6 +396,79 @@ export class SettingsService {
     ]);
 
     return { bcp: limpio };
+  }
+
+  /** El comunicado tal cual está guardado, publicado o no. Lo ve la comisión. */
+  async comunicado(): Promise<Comunicado> {
+    const fila = await this.prisma.ajuste.findUnique({ where: { clave: CLAVE_COMUNICADO } });
+    if (!fila?.valor) return { ...COMUNICADO_VACIO };
+
+    try {
+      return { ...COMUNICADO_VACIO, ...JSON.parse(fila.valor) };
+    } catch {
+      // Un JSON roto no puede dejar la portada sin cargar.
+      return { ...COMUNICADO_VACIO };
+    }
+  }
+
+  async guardarComunicado(datos: Partial<Comunicado>): Promise<Comunicado> {
+    const actual = await this.comunicado();
+    const nuevo: Comunicado = { ...actual };
+
+    for (const [campo, largo] of Object.entries(LARGOS_COMUNICADO)) {
+      if (datos[campo as keyof Comunicado] === undefined) continue;
+      const valor = String(datos[campo as keyof Comunicado] ?? '').trim();
+      if (valor.length > largo) {
+        throw new BadRequestException(`Ese campo no debe pasar de ${largo} caracteres`);
+      }
+      (nuevo as any)[campo] = valor;
+    }
+
+    if (datos.estilo && ESTILOS_COMUNICADO.includes(datos.estilo)) nuevo.estilo = datos.estilo;
+    if (datos.publicado !== undefined) nuevo.publicado = Boolean(datos.publicado);
+
+    if (nuevo.publicado && !nuevo.titulo) {
+      throw new BadRequestException('Escriba el título antes de publicar el comunicado');
+    }
+
+    // La marca de tiempo cambia en cada guardado: así el visitante que ya lo
+    // había cerrado vuelve a verlo cuando la comisión lo corrige.
+    nuevo.actualizado = new Date().toISOString();
+
+    await this.prisma.ajuste.upsert({
+      where: { clave: CLAVE_COMUNICADO },
+      create: { clave: CLAVE_COMUNICADO, valor: JSON.stringify(nuevo) },
+      update: { valor: JSON.stringify(nuevo) },
+    });
+
+    return nuevo;
+  }
+
+  /**
+   * Titular y número de la cuenta Yape.
+   *
+   * El número se guarda tal como lo escriban —con espacios si quieren— porque
+   * aquí solo se muestra para que el tutor lo copie; no se arma ningún enlace
+   * con él, a diferencia del de WhatsApp.
+   */
+  async guardarYape(datos: { numero?: string; titular?: string }) {
+    const numero = (datos.numero || '').trim();
+    const titular = (datos.titular || '').trim();
+
+    if (numero.replace(/\D/g, '').length < 6) {
+      throw new BadRequestException('Escriba el número de la cuenta Yape');
+    }
+    if (!titular) throw new BadRequestException('Escriba el nombre del titular');
+    if (numero.length > 40 || titular.length > 120) {
+      throw new BadRequestException('El número o el nombre son demasiado largos');
+    }
+
+    await Promise.all([
+      this.guardar(CLAVES_YAPE.numero, numero),
+      this.guardar(CLAVES_YAPE.titular, titular),
+    ]);
+
+    return { yape: { numero, titular } };
   }
 
   /**

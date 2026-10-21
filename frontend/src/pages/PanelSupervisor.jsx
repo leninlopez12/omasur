@@ -4,8 +4,11 @@ import {
   CalendarCheck,
   CheckCircle2,
   ClipboardCheck,
+  ClipboardList,
   GraduationCap as IconoGrado,
   GraduationCap,
+  IdCard,
+  Megaphone,
   LayoutDashboard,
   MapPin,
   Landmark,
@@ -23,6 +26,10 @@ import PanelLayout from '../layouts/PanelLayout.jsx';
 import { Boton, Cargando, Etiqueta, Tarjeta } from '../components/Ui.jsx';
 import { ListaInscripciones, RevisarInscripcion } from '../components/Inscripciones.jsx';
 import RevisarAlumnos from '../components/RevisarAlumnos.jsx';
+import Abonos from '../components/Abonos.jsx';
+import Consolidado from '../components/Consolidado.jsx';
+import EtapasCredencial from '../components/EtapasCredencial.jsx';
+import Comunicados from '../components/Comunicados.jsx';
 import {
   AjusteBcp,
   AjusteWhatsapp,
@@ -45,6 +52,7 @@ const SECCIONES = [
   { id: 'aprobar', texto: 'Por aprobar', icono: ClipboardCheck },
   { id: 'revisar-alumnos', texto: 'Inscripciones', icono: ReceiptText },
   { id: 'delegaciones', texto: 'Delegaciones', icono: School },
+  { id: 'abonos', texto: 'Abonos', icono: Wallet },
   {
     id: 'consultas',
     texto: 'Consultas',
@@ -54,6 +62,9 @@ const SECCIONES = [
       { id: 'consulta-estudiantes', texto: 'Estudiantes', icono: IconoGrado },
     ],
   },
+  { id: 'consolidado', texto: 'Consolidado', icono: ClipboardList },
+  { id: 'credenciales', texto: 'Credenciales', icono: IdCard },
+  { id: 'comunicados', texto: 'Comunicados', icono: Megaphone },
   {
     id: 'ajustes',
     texto: 'Ajustes',
@@ -73,8 +84,12 @@ const TITULOS = {
   aprobar: 'Por aprobar',
   'revisar-alumnos': 'Inscripciones por alumno',
   delegaciones: 'Delegaciones',
+  abonos: 'Abonos por delegación',
   'consulta-tutores': 'Consultas · Tutores',
   'consulta-estudiantes': 'Consultas · Estudiantes',
+  consolidado: 'Consolidado general',
+  credenciales: 'Credenciales',
+  comunicados: 'Comunicados',
   'ajustes-inscripciones': 'Ajustes · Inscripciones',
   'ajustes-whatsapp': 'Ajustes · Grupo WhatsApp',
   'ajustes-boton-wa': 'Ajustes · Botón de WhatsApp',
@@ -157,6 +172,7 @@ function Contenido() {
 
       {seccion === 'aprobar' && revision('EN_REVISION')}
       {seccion === 'delegaciones' && revision('')}
+      {seccion === 'abonos' && <Abonos />}
 
       {seccion === 'revisar-alumnos' &&
         (detalleId ? (
@@ -171,6 +187,9 @@ function Contenido() {
 
       {seccion === 'consulta-tutores' && <ConsultaTutores alAbrirTutor={abrirTutor} />}
       {seccion === 'consulta-estudiantes' && <ConsultaEstudiantes />}
+      {seccion === 'consolidado' && <Consolidado />}
+      {seccion === 'credenciales' && <EtapasCredencial />}
+      {seccion === 'comunicados' && <Comunicados />}
 
       {seccion === 'ajustes-inscripciones' && (
         <CierreInscripciones
@@ -183,7 +202,7 @@ function Contenido() {
         <GruposWhatsApp grupos={ajustes.grupos} alCambiar={recargarAjustes} />
       )}
       {seccion === 'ajustes-yape' && (
-        <AjusteYape yapeQr={ajustes.yapeQr} alCambiar={recargarAjustes} />
+        <AjusteYape yapeQr={ajustes.yapeQr} yape={ajustes.yape} alCambiar={recargarAjustes} />
       )}
       {seccion === 'ajustes-boton-wa' && (
         <AjusteWhatsapp whatsapp={ajustes.whatsapp} alCambiar={recargarAjustes} />

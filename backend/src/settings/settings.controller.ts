@@ -16,7 +16,7 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import type { Response } from 'express';
-import { ArchivoAdministrado, SettingsService, TipoImagen } from './settings.service';
+import { ArchivoAdministrado, Comunicado, SettingsService, TipoImagen } from './settings.service';
 import { StorageService } from '../storage/storage.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
@@ -110,6 +110,57 @@ export class SettingsController {
   @Delete('yape')
   quitarYape() {
     return this.settings.quitarArchivo('yape');
+  }
+
+  // --------------------------------------------------------------------
+  // Comunicado de la portada
+  // --------------------------------------------------------------------
+
+  /** El comunicado completo, publicado o no: para editarlo. */
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'SUPERVISOR')
+  @Get('comunicado')
+  verComunicado() {
+    return this.settings.comunicado();
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'SUPERVISOR')
+  @Post('comunicado')
+  guardarComunicado(@Body() body: Partial<Comunicado>) {
+    return this.settings.guardarComunicado(body);
+  }
+
+  // --------------------------------------------------------------------
+  // Logo de la credencial
+  // --------------------------------------------------------------------
+
+  @Get('credencial')
+  verLogoCredencial(@Res({ passthrough: false }) res: Response) {
+    return this.entregar('credencial', res);
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'SUPERVISOR')
+  @Post('credencial')
+  @UseInterceptors(recibir('imagen'))
+  guardarLogoCredencial(@UploadedFile() archivo: Express.Multer.File) {
+    return this.settings.guardarArchivo('credencial', archivo);
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'SUPERVISOR')
+  @Delete('credencial')
+  quitarLogoCredencial() {
+    return this.settings.quitarArchivo('credencial');
+  }
+
+  /** Titular y número de la cuenta, lo que acompaña al QR en el paso de pago. */
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'SUPERVISOR')
+  @Post('yape/datos')
+  guardarDatosYape(@Body() body: { numero?: string; titular?: string }) {
+    return this.settings.guardarYape(body);
   }
 
   // --------------------------------------------------------------------

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from './api';
+import { CONTACTO } from './datos';
 
 /** Imagen del QR que se usa si la comisión todavía no subió una. */
 export const QR_YAPE_POR_DEFECTO = '/img/yape.jpg';
@@ -11,10 +12,12 @@ export const QR_YAPE_POR_DEFECTO = '/img/yape.jpg';
 const VACIO = {
   grupos: [],
   yapeQr: null,
+  yape: null,
   inscripcionesCerradas: false,
   cerradasEn: null,
   bases: null,
   whatsapp: null,
+  comunicado: null,
 };
 
 export function useAjustes() {
@@ -36,5 +39,18 @@ export function useAjustes() {
     cargar();
   }, [cargar]);
 
-  return { ajustes, cargando, recargar: cargar, qrYape: ajustes.yapeQr || QR_YAPE_POR_DEFECTO };
+  // El titular y el número salen de los ajustes; CONTACTO queda de respaldo
+  // para el instante en que la página todavía no los cargó.
+  const yape = {
+    numero: ajustes.yape?.numero || CONTACTO.yape,
+    titular: ajustes.yape?.titular || CONTACTO.titular,
+  };
+
+  return {
+    ajustes,
+    cargando,
+    recargar: cargar,
+    qrYape: ajustes.yapeQr || QR_YAPE_POR_DEFECTO,
+    yape,
+  };
 }

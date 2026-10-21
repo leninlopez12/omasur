@@ -102,43 +102,115 @@ export function ListaInscripciones({ alAbrir, estadoInicial = '' }) {
           </p>
         </Tarjeta>
       ) : (
-        <div className="grid gap-4">
-          {lista.map((fila) => {
-            const estado = ESTADOS[fila.estado] || ESTADOS.BORRADOR;
-            return (
-              <button
-                key={fila.id}
-                onClick={() => alAbrir(fila.id)}
-                className="rounded-2xl border border-slate-200 bg-white p-6 text-left transition hover:-translate-y-1 hover:border-granate-400 hover:shadow-suave"
-              >
-                <div className="flex flex-wrap items-start justify-between gap-5">
-                  <div className="min-w-0">
-                    <p className="text-xl font-black text-slate-900">
-                      {fila.institucion || 'Sin institución'}
-                    </p>
-                    <p className="mt-1.5 text-base text-slate-600">
-                      {fila.nombres} {fila.apellidos} · {fila.celular}
-                    </p>
-                    <p className="mt-1 text-base text-slate-500">
-                      {fila.region} · {fila.provincia} · {fila.distrito}
-                    </p>
-                  </div>
-                  <div className="flex flex-col items-end gap-3">
-                    <Etiqueta compacto className={estado.clase}>{estado.texto}</Etiqueta>
-                    <p className="text-base font-bold text-granate-700">
-                      {fila.totalAlumnos} estudiantes
-                    </p>
-                    <p className="text-base text-slate-500">
-                      {ETIQUETA_MODALIDAD[fila.modalidad] || fila.modalidad}
-                    </p>
-                  </div>
-                </div>
-              </button>
-            );
-          })}
-        </div>
+        <TablaDelegaciones filas={lista} alAbrir={alAbrir} />
       )}
     </div>
+  );
+}
+
+/**
+ * Las delegaciones en tabla.
+ *
+ * Antes era una tarjeta por delegación: con pocas se leía bien, pero al
+ * crecer obligaba a recorrer la página entera para comparar dos. En columnas
+ * se compara de un vistazo quién tiene cuántos alumnos y quién ya pagó.
+ */
+function TablaDelegaciones({ filas, alAbrir }) {
+  return (
+    <Tarjeta className="p-6">
+      <p className="mb-5 text-base text-slate-600">
+        {filas.length} {filas.length === 1 ? 'delegación' : 'delegaciones'}
+      </p>
+
+      <div className="overflow-x-auto rounded-2xl border-2 border-slate-200">
+        <table className="w-full min-w-[58rem] text-left">
+          <thead className="bg-slate-50">
+            <tr className="text-base text-slate-500">
+              <th className="px-4 py-3 font-semibold">N.º</th>
+              <th className="px-4 py-3 font-semibold">Institución</th>
+              <th className="px-4 py-3 font-semibold">Tutor</th>
+              <th className="px-4 py-3 font-semibold">Ubicación</th>
+              <th className="px-4 py-3 text-center font-semibold">Alumnos</th>
+              <th className="px-4 py-3 font-semibold">Comprobante</th>
+              <th className="px-4 py-3 font-semibold">Estado</th>
+              <th className="px-4 py-3 font-semibold" />
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {filas.map((fila, i) => {
+              const estado = ESTADOS[fila.estado] || ESTADOS.BORRADOR;
+
+              return (
+                <tr
+                  key={fila.id}
+                  onClick={() => alAbrir(fila.id)}
+                  className="cursor-pointer align-top transition hover:bg-granate-50/60"
+                >
+                  <td className="px-4 py-3 text-base text-slate-500">{i + 1}</td>
+                  <td className="px-4 py-3">
+                    <span className="block text-base font-bold text-slate-900">
+                      {fila.institucion || 'Sin institución'}
+                    </span>
+                    <span className="block text-base text-slate-500">
+                      {ETIQUETA_MODALIDAD[fila.modalidad] || fila.modalidad}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3">
+                    <span className="block text-base text-slate-900">
+                      {fila.nombres} {fila.apellidos}
+                    </span>
+                    <span className="block text-base text-slate-500">{fila.celular}</span>
+                  </td>
+                  <td className="px-4 py-3 text-base text-slate-600">
+                    <span className="block">{fila.region || '—'}</span>
+                    {(fila.provincia || fila.distrito) && (
+                      <span className="block text-slate-400">
+                        {[fila.provincia, fila.distrito].filter(Boolean).join(' · ')}
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-center text-xl font-black text-granate-700">
+                    {fila.totalAlumnos}
+                  </td>
+                  <td className="px-4 py-3 text-base">
+                    {fila.pago ? (
+                      <>
+                        <span className="block font-semibold text-slate-900">
+                          S/ {fila.pago.monto}
+                        </span>
+                        <span className="block text-slate-500">
+                          {new Date(fila.pago.createdAt).toLocaleDateString('es-PE')}
+                        </span>
+                      </>
+                    ) : (
+                      <span className="text-slate-400">Sin enviar</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3">
+                    <Etiqueta compacto className={estado.clase}>
+                      {estado.texto}
+                    </Etiqueta>
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    <Boton
+                      variante="suave"
+                      tamano="chico"
+                      onClick={(evento) => {
+                        evento.stopPropagation();
+                        alAbrir(fila.id);
+                      }}
+                    >
+                      <ClipboardCheck className="h-5 w-5" />
+                      Revisar
+                    </Boton>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </Tarjeta>
   );
 }
 

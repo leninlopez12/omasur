@@ -16,6 +16,7 @@ import { CONVENIOS, GRADOS } from '../lib/datos';
 import { useAjustes } from '../lib/ajustes';
 import IconoWhatsApp from '../components/IconoWhatsApp.jsx';
 import BotonWhatsApp from '../components/BotonWhatsApp.jsx';
+import Comunicado from '../components/Comunicado.jsx';
 
 const ETAPAS = [
   {
@@ -468,6 +469,7 @@ export default function Landing() {
 
       <Footer />
       <BotonWhatsApp whatsapp={ajustes.whatsapp} />
+      <Comunicado comunicado={ajustes.comunicado} />
     </div>
   );
 }
