@@ -17,6 +17,8 @@ import { LimitePeticionesGuard } from '../common/limite.guard';
   ],
   providers: [AuthService, RecuperacionService, JwtStrategy, LimitePeticionesGuard],
   controllers: [AuthController],
-  exports: [AuthService],
+  // JwtModule sale fuera para que el panel pueda emitir la sesión prestada
+  // con la misma clave y la misma configuración, sin repetirla.
+  exports: [AuthService, JwtModule],
 })
 export class AuthModule {}

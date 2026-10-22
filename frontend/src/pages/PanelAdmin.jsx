@@ -14,6 +14,7 @@ import {
   Megaphone,
   ImageIcon,
   LayoutDashboard,
+  LogIn,
   Mail,
   Landmark,
   MessageCircle,
@@ -23,6 +24,7 @@ import {
   Search,
   Settings,
   UserCog,
+  UserCheck,
   Users,
   Wallet,
 } from 'lucide-react';
@@ -58,8 +60,10 @@ import Avisos from '../components/Avisos.jsx';
 import Reportes from '../components/Reportes.jsx';
 import Abonos from '../components/Abonos.jsx';
 import Consolidado from '../components/Consolidado.jsx';
+import Acceder from '../components/Acceder.jsx';
 import EtapasCredencial from '../components/EtapasCredencial.jsx';
 import Comunicados from '../components/Comunicados.jsx';
+import CredencialesComision from '../components/CredencialesComision.jsx';
 
 const SECCIONES = [
   { id: 'tablero', texto: 'Tablero', icono: LayoutDashboard },
@@ -77,8 +81,16 @@ const SECCIONES = [
     ],
   },
   { id: 'consolidado', texto: 'Consolidado', icono: ClipboardList },
-  { id: 'credenciales', texto: 'Credenciales', icono: IdCard },
-  { id: 'comunicados', texto: 'Comunicados', icono: Megaphone },
+  { id: 'acceder', texto: 'Acceder', icono: LogIn },
+  {
+    id: 'credenciales',
+    texto: 'Credenciales',
+    icono: IdCard,
+    hijos: [
+      { id: 'cred-delegaciones', texto: 'De delegaciones', icono: Users },
+      { id: 'cred-tutores', texto: 'De tutores', icono: UserCheck },
+    ],
+  },
   {
     id: 'ajustes',
     texto: 'Ajustes',
@@ -89,6 +101,8 @@ const SECCIONES = [
       { id: 'ajustes-boton-wa', texto: 'Botón de WhatsApp', icono: MessageCircle },
       { id: 'ajustes-yape', texto: 'Yape', icono: QrCode },
       { id: 'ajustes-bcp', texto: 'BCP', icono: Landmark },
+      { id: 'ajustes-credencial', texto: 'Diseño de credenciales', icono: IdCard },
+      { id: 'ajustes-comunicado', texto: 'Comunicado', icono: Megaphone },
       { id: 'ajustes-imagenes', texto: 'Imágenes', icono: ImageIcon },
       { id: 'ajustes-bases', texto: 'Bases del concurso', icono: FileText },
       { id: 'ajustes-supervisores', texto: 'Supervisores', icono: UserCog },
@@ -106,13 +120,16 @@ const TITULOS = {
   'consulta-tutores': 'Consultas · Tutores',
   'consulta-estudiantes': 'Consultas · Estudiantes',
   consolidado: 'Consolidado general',
-  credenciales: 'Credenciales',
-  comunicados: 'Comunicados',
+  acceder: 'Entrar como tutor',
+  'cred-delegaciones': 'Credenciales de delegaciones',
+  'cred-tutores': 'Credenciales de tutores',
   'ajustes-inscripciones': 'Ajustes · Inscripciones',
   'ajustes-whatsapp': 'Ajustes · Grupo WhatsApp',
   'ajustes-boton-wa': 'Ajustes · Botón de WhatsApp',
   'ajustes-yape': 'Ajustes · Yape',
   'ajustes-bcp': 'Ajustes · BCP',
+  'ajustes-credencial': 'Ajustes · Diseño de credenciales',
+  'ajustes-comunicado': 'Ajustes · Comunicado',
   'ajustes-imagenes': 'Ajustes · Imágenes',
   'ajustes-bases': 'Ajustes · Bases del concurso',
   'ajustes-supervisores': 'Ajustes · Supervisores',
@@ -186,8 +203,9 @@ function Contenido() {
       {seccion === 'consulta-tutores' && <ConsultaTutores alAbrirTutor={abrirTutor} />}
       {seccion === 'consulta-estudiantes' && <ConsultaEstudiantes />}
       {seccion === 'consolidado' && <Consolidado />}
-      {seccion === 'credenciales' && <EtapasCredencial />}
-      {seccion === 'comunicados' && <Comunicados />}
+      {seccion === 'acceder' && <Acceder />}
+      {seccion === 'cred-delegaciones' && <CredencialesComision modo="delegaciones" />}
+      {seccion === 'cred-tutores' && <CredencialesComision modo="tutores" />}
 
       {seccion === 'ajustes-inscripciones' && (
         <CierreInscripciones
@@ -206,6 +224,8 @@ function Contenido() {
         <AjusteWhatsapp whatsapp={ajustes.whatsapp} alCambiar={recargarAjustes} />
       )}
       {seccion === 'ajustes-bcp' && <AjusteBcp bcp={ajustes.bcp} alCambiar={recargarAjustes} />}
+      {seccion === 'ajustes-credencial' && <EtapasCredencial />}
+      {seccion === 'ajustes-comunicado' && <Comunicados />}
       {seccion === 'ajustes-imagenes' && (
         <ImagenesFondo
           imagenHero={ajustes.imagenHero}

@@ -15,6 +15,7 @@ import {
   ReceiptText,
   Search,
   Settings,
+  ShieldAlert,
   UserCheck,
   Users,
   Wrench,
@@ -39,6 +40,7 @@ import {
 } from '../components/Ui.jsx';
 import SelectorUbigeo from '../components/SelectorUbigeo.jsx';
 import { api, descargar, mensajeError } from '../lib/api';
+import { volverAMiCuenta } from '../lib/suplantar';
 import { useAuth } from '../lib/auth.jsx';
 import {
   ESTADOS,
@@ -56,6 +58,7 @@ const SECCIONES = [
   { id: 'pago', texto: 'Comprobante de pago', icono: CreditCard },
   { id: 'historial', texto: 'Inscripciones', icono: ReceiptText },
   { id: 'credenciales', texto: 'Credenciales', icono: IdCard },
+  { id: 'mi-credencial', texto: 'Mi credencial', icono: BadgeCheck },
 ];
 
 /** Va abajo del sidebar, junto a cerrar sesión. */
@@ -66,7 +69,8 @@ const TITULOS = {
   alumnos: 'Mis estudiantes',
   'pago-quienes': 'Pago de la delegación',
   pago: 'Comprobante de pago',
-  credenciales: 'Credenciales',
+  credenciales: 'Credenciales de mis estudiantes',
+  'mi-credencial': 'Mi credencial',
   historial: 'Inscripciones',
   datos: 'Mis datos',
 };
@@ -102,6 +106,7 @@ function Contenido() {
       acciones={<Campanita />}
     >
       <AvisosEnVivo />
+      <FranjaSuplantacion />
 
       {!resumen ? (
         <Cargando texto="Cargando su inscripción" />
@@ -125,11 +130,37 @@ function Contenido() {
             />
           )}
           {seccion === 'credenciales' && <SeccionCredenciales resumen={resumen} />}
+          {seccion === 'mi-credencial' && <MiCredencial resumen={resumen} />}
           {seccion === 'historial' && <MisInscripciones />}
           {seccion === 'datos' && <SeccionDatos resumen={resumen} alCambiar={cargar} />}
         </>
       )}
     </PanelLayout>
+  );
+}
+
+/**
+ * La franja que avisa que la sesión es prestada.
+ *
+ * Va fija arriba y en rojo a propósito: quien está adentro tiene que saber en
+ * todo momento que lo que haga va a nombre del tutor, no suyo.
+ */
+function FranjaSuplantacion() {
+  const { usuario } = useAuth();
+  if (!usuario?.actuandoComo) return null;
+
+  return (
+    <div className="mb-6 flex flex-wrap items-center justify-between gap-4 rounded-2xl border-2 border-rose-300 bg-rose-50 px-5 py-4">
+      <p className="flex items-center gap-3 text-xl font-bold text-rose-900">
+        <ShieldAlert className="h-7 w-7 shrink-0" />
+        Está actuando como {usuario.nombres} {usuario.apellidos} ·{' '}
+        {usuario.institucion || 'sin institución'}
+      </p>
+      <Boton variante="peligro" tamano="chico" onClick={volverAMiCuenta}>
+        <ArrowLeft className="h-5 w-5" />
+        Volver a mi cuenta
+      </Boton>
+    </div>
   );
 }
 
@@ -533,6 +564,113 @@ function RespuestaObservacion({ resumen, alCambiar, alVolver, alTerminar }) {
         conMotivo={false}
       />
     </div>
+  );
+}
+
+/**
+ * La credencial del propio tutor.
+ *
+ * Lleva su nombre, su DNI, su institución y cuántos estudiantes trae: la
+ * necesita para entrar a la sede igual que sus alumnos. Sale en el mismo
+ * formato que la de ellos, de la etapa que la comisión tenga publicada.
+ */
+function MiCredencial({ resumen }) {
+  const [etapas, setEtapas] = useState(null);
+  const [etapa, setEtapa] = useState('');
+  const [bajando, setBajando] = useState(false);
+  const [error, setError] = useState('');
+  const habilitado = resumen.estado === 'APROBADA';
+
+  useEffect(() => {
+    if (!habilitado) return;
+    api
+      .get('/credenciales/etapas')
+      .then(({ data }) => {
+        setEtapas(data);
+        if (data.length) setEtapa(data[data.length - 1].clave);
+      })
+      .catch(() => setEtapas([]));
+  }, [habilitado]);
+
+  if (!habilitado) {
+    return (
+      <Tarjeta>
+        <BadgeCheck className="h-14 w-14 text-granate-600" />
+        <h3 className="mt-6 text-3xl font-black text-slate-900">Mi credencial</h3>
+        <div className="mt-6">
+          <Aviso tipo="alerta" icono={AlertCircle} titulo="Pendiente de aprobación">
+            Se habilita cuando la comisión apruebe su inscripción. Siga el avance en
+            «Inscripciones».
+          </Aviso>
+        </div>
+      </Tarjeta>
+    );
+  }
+
+  if (!etapas) return <Cargando texto="Cargando su credencial" />;
+
+  const bajar = async () => {
+    setError('');
+    setBajando(true);
+    try {
+      await descargar('/credenciales/mi-credencial?etapa=' + etapa, 'mi-credencial.pdf');
+    } catch {
+      setError('No se pudo generar su credencial');
+    } finally {
+      setBajando(false);
+    }
+  };
+
+  return (
+    <Tarjeta>
+      <BadgeCheck className="h-14 w-14 text-granate-600" />
+      <h3 className="mt-6 text-3xl font-black text-slate-900">Mi credencial</h3>
+      <p className="mt-3 text-xl text-slate-600">
+        La suya, como tutor responsable de {resumen.institucion}. Preséntela el día del examen
+        junto con su DNI.
+      </p>
+
+      {etapas.length === 0 ? (
+        <div className="mt-8">
+          <Aviso tipo="alerta" icono={AlertCircle} titulo="Todavía no está publicada">
+            La comisión la habilita antes de cada etapa. Le avisaremos en su panel.
+          </Aviso>
+        </div>
+      ) : (
+        <>
+          {etapas.length > 1 ? (
+            <div className="mt-8 max-w-md">
+              <Selector etiqueta="Etapa" value={etapa} onChange={(e) => setEtapa(e.target.value)}>
+                {etapas.map((e) => (
+                  <option key={e.clave} value={e.clave}>
+                    {e.etiqueta} · {e.fecha}
+                  </option>
+                ))}
+              </Selector>
+            </div>
+          ) : (
+            <p className="mt-6 text-xl font-semibold text-granate-700">
+              {etapas[0].etiqueta} · {etapas[0].fecha}
+            </p>
+          )}
+
+          {error && (
+            <div className="mt-6">
+              <Aviso tipo="error" icono={AlertCircle}>
+                {error}
+              </Aviso>
+            </div>
+          )}
+
+          <div className="mt-8">
+            <Boton tamano="grande" cargando={bajando} onClick={bajar}>
+              <Download className="h-7 w-7" />
+              Descargar mi credencial
+            </Boton>
+          </div>
+        </>
+      )}
+    </Tarjeta>
   );
 }
 

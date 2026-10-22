@@ -20,6 +20,25 @@ type AlumnoConTutor = {
   tutor: { institucion: string; modalidad: string; region: string; provincia: string };
 };
 
+/**
+ * Lo que se imprime en una credencial, ya resuelto.
+ *
+ * El alumno y el tutor usan el mismo molde: cambian los rótulos y los datos,
+ * no el diseño. Así las dos credenciales se ven como parte del mismo juego.
+ */
+interface Impresion {
+  dni: string;
+  nombre: string;
+  /** El recuadro del medio: la categoría del alumno o la condición del tutor. */
+  distintivo: string;
+  distintivoTitulo: string;
+  /** La línea bajo el nombre: el grado del alumno o lo que trae el tutor. */
+  detalleTitulo: string;
+  detalle: string;
+  institucion: string;
+  nombreTitulo: string;
+}
+
 @Injectable()
 export class CredentialsService {
   constructor(
@@ -70,7 +89,7 @@ export class CredentialsService {
       throw new ForbiddenException('Este estudiante todavía no tiene su inscripción aprobada');
     }
     return this.construirPdf(
-      [alumno as unknown as AlumnoConTutor],
+      [this.comoAlumno(alumno as unknown as AlumnoConTutor)],
       await this.etapas.paraImprimir(etapa),
     );
   }
@@ -103,7 +122,129 @@ export class CredentialsService {
     }
 
     const alumnos = students.map((a) => ({ ...a, tutor })) as unknown as AlumnoConTutor[];
-    return this.construirPdf(alumnos, await this.etapas.paraImprimir(filtros.etapa));
+    return this.construirPdf(
+      alumnos.map((a) => this.comoAlumno(a)),
+      await this.etapas.paraImprimir(filtros.etapa),
+    );
+  }
+
+  /**
+   * La credencial del propio tutor.
+   *
+   * La necesita para entrar a la sede el día del examen igual que sus
+   * alumnos; por eso lleva su institución y cuántos estudiantes trae.
+   */
+  async credencialDelTutorMismo(tutorId: string, etapa?: string): Promise<Buffer> {
+    const tutor = await this.prisma.tutor.findUnique({
+      where: { id: tutorId },
+      include: { _count: { select: { students: true } } },
+    });
+    if (!tutor) throw new NotFoundException('Tutor no encontrado');
+    if (tutor.estado !== 'APROBADA') {
+      throw new ForbiddenException('Su inscripción aún no ha sido aprobada por la comisión');
+    }
+
+    const aprobados = await this.prisma.student.count({
+      where: { tutorId, payment: { estado: 'APROBADO' } },
+    });
+
+    return this.construirPdf(
+      [this.comoTutor(tutor, aprobados)],
+      await this.etapas.paraImprimir(etapa),
+    );
+  }
+
+  /** Las credenciales de varios tutores en un solo PDF, para la comisión. */
+  async credencialesDeTutores(tutorIds: string[] | null, etapa?: string): Promise<Buffer> {
+    const tutores = await this.prisma.tutor.findMany({
+      where: { estado: 'APROBADA', ...(tutorIds?.length ? { id: { in: tutorIds } } : {}) },
+      orderBy: { institucion: 'asc' },
+    });
+    if (tutores.length === 0) {
+      throw new NotFoundException('No hay delegaciones aprobadas');
+    }
+
+    const conteos = await this.prisma.student.groupBy({
+      by: ['tutorId'],
+      where: { tutorId: { in: tutores.map((t) => t.id) }, payment: { estado: 'APROBADO' } },
+      _count: { _all: true },
+    });
+    const porTutor = new Map(conteos.map((c) => [c.tutorId, c._count._all]));
+
+    return this.construirPdf(
+      tutores.map((t) => this.comoTutor(t, porTutor.get(t.id) || 0)),
+      await this.etapas.paraImprimir(etapa),
+    );
+  }
+
+  /** Las delegaciones aprobadas, para que la comisión baje sus credenciales. */
+  async delegacionesAprobadas() {
+    const tutores = await this.prisma.tutor.findMany({
+      where: { estado: 'APROBADA' },
+      orderBy: { institucion: 'asc' },
+      select: {
+        id: true,
+        dni: true,
+        nombres: true,
+        apellidos: true,
+        correo: true,
+        celular: true,
+        institucion: true,
+        modalidad: true,
+        departamento: true,
+        provincia: true,
+        distrito: true,
+      },
+    });
+
+    const conteos = await this.prisma.student.groupBy({
+      by: ['tutorId'],
+      where: { tutorId: { in: tutores.map((t) => t.id) }, payment: { estado: 'APROBADO' } },
+      _count: { _all: true },
+    });
+    const porTutor = new Map(conteos.map((c) => [c.tutorId, c._count._all]));
+
+    return tutores.map((t) => ({
+      tutorId: t.id,
+      institucion: t.institucion || 'Sin institución',
+      tutor: `${t.nombres} ${t.apellidos}`.trim(),
+      dni: t.dni,
+      correo: t.correo,
+      celular: t.celular,
+      modalidad: t.modalidad,
+      departamento: t.departamento,
+      provincia: t.provincia,
+      distrito: t.distrito,
+      alumnosAprobados: porTutor.get(t.id) || 0,
+    }));
+  }
+
+  /** El tutor, vestido con el molde de la credencial. */
+  private comoTutor(tutor: any, alumnos: number): Impresion {
+    return {
+      dni: tutor.dni || '—',
+      nombre: `${tutor.nombres} ${tutor.apellidos}`.trim(),
+      nombreTitulo: 'TUTOR RESPONSABLE',
+      distintivo: 'TUTOR',
+      distintivoTitulo: 'CONDICIÓN',
+      detalleTitulo: 'ESTUDIANTES A CARGO',
+      detalle: String(alumnos),
+      institucion: tutor.institucion || 'Sin institución',
+    };
+  }
+
+  /** El alumno, con el mismo molde. */
+  private comoAlumno(alumno: AlumnoConTutor): Impresion {
+    return {
+      dni: alumno.dni,
+      nombre: alumno.nombres,
+      nombreTitulo: 'ESTUDIANTE',
+      distintivo: 'CAT. ' + alumno.categoria,
+      distintivoTitulo: 'CATEGORÍA',
+      detalleTitulo: 'GRADO',
+      detalle: etiquetaGrado(alumno.grado as any),
+      institucion: alumno.tutor.institucion,
+    };
   }
 
   /**
@@ -130,11 +271,21 @@ export class CredentialsService {
       },
     } as unknown as AlumnoConTutor;
 
-    return this.construirPdf([ejemplo, ejemplo], etapa);
+    // Una de alumno y una de tutor: se ven las dos de un vistazo.
+    return this.construirPdf(
+      [
+        this.comoAlumno(ejemplo),
+        this.comoTutor(
+          { dni: '87654321', nombres: 'NOMBRE DEL', apellidos: 'TUTOR', institucion: ejemplo.tutor.institucion },
+          12,
+        ),
+      ],
+      etapa,
+    );
   }
 
   /** Dos credenciales por página A4, listas para recortar. */
-  private async construirPdf(alumnos: AlumnoConTutor[], etapa: Etapa): Promise<Buffer> {
+  private async construirPdf(fichas: Impresion[], etapa: Etapa): Promise<Buffer> {
     const logo = await this.logo();
 
     return new Promise((resolve, reject) => {
@@ -144,10 +295,10 @@ export class CredentialsService {
       doc.on('end', () => resolve(Buffer.concat(partes)));
       doc.on('error', reject);
 
-      alumnos.forEach((alumno, i) => {
+      fichas.forEach((ficha, i) => {
         const posicion = i % 2;
         if (i > 0 && posicion === 0) doc.addPage();
-        this.dibujarCredencial(doc, alumno, etapa, logo, posicion === 0 ? 40 : 440);
+        this.dibujarCredencial(doc, ficha, etapa, logo, posicion === 0 ? 40 : 440);
       });
 
       doc.end();
@@ -190,7 +341,7 @@ export class CredentialsService {
    */
   private dibujarCredencial(
     doc: PDFKit.PDFDocument,
-    alumno: AlumnoConTutor,
+    ficha: Impresion,
     etapa: Etapa,
     logo: Buffer | null,
     y: number,
@@ -255,8 +406,8 @@ export class CredentialsService {
     // Los recuadros de arriba. El DNI y la categoría son del estudiante y
     // siempre están; la fecha la pone la comisión y puede faltar.
     const cajas: { titulo: string; valor: string; tamano: number }[] = [
-      { titulo: 'DNI DEL ESTUDIANTE', valor: alumno.dni, tamano: 17 },
-      { titulo: 'CATEGORÍA', valor: 'CAT. ' + alumno.categoria, tamano: 17 },
+      { titulo: 'DNI', valor: ficha.dni, tamano: 17 },
+      { titulo: ficha.distintivoTitulo, valor: ficha.distintivo, tamano: 17 },
     ];
     if (etapa.fecha) cajas.push({ titulo: 'FECHA', valor: etapa.fecha, tamano: 9 });
 
@@ -279,14 +430,21 @@ export class CredentialsService {
     let cursor = y + 168;
     const salto = 38;
 
-    cursor = this.campo(doc, x + 26, cursor, 'ESTUDIANTE', alumno.nombres, ancho - 52, salto);
+    cursor = this.campo(doc, x + 26, cursor, ficha.nombreTitulo, ficha.nombre, ancho - 52, salto);
 
-    const grado = etiquetaGrado(alumno.grado as any);
     if (etapa.hora) {
-      this.campo(doc, x + 26, cursor, 'GRADO', grado, 210, 0);
+      this.campo(doc, x + 26, cursor, ficha.detalleTitulo, ficha.detalle, 210, 0);
       cursor = this.campo(doc, x + 254, cursor, 'HORA DE INGRESO', etapa.hora, 215, salto);
     } else {
-      cursor = this.campo(doc, x + 26, cursor, 'GRADO', grado, ancho - 52, salto);
+      cursor = this.campo(
+        doc,
+        x + 26,
+        cursor,
+        ficha.detalleTitulo,
+        ficha.detalle,
+        ancho - 52,
+        salto,
+      );
     }
 
     cursor = this.campo(
@@ -294,7 +452,7 @@ export class CredentialsService {
       x + 26,
       cursor,
       'INSTITUCIÓN EDUCATIVA',
-      alumno.tutor.institucion,
+      ficha.institucion,
       ancho - 52,
       salto,
     );

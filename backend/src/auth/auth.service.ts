@@ -158,6 +158,10 @@ export class AuthService implements OnModuleInit {
     });
     if (!tutor) throw new UnauthorizedException('Sesión inválida');
     const { password, ...datos } = tutor;
+    // Si la sesión es prestada, el panel lo avisa en pantalla.
+    if (user.actuandoComo) {
+      return { ...datos, rol: 'TUTOR', actuandoComo: true, suplantadoPor: user.suplantadoPor };
+    }
     return { rol: 'TUTOR', ...datos };
   }
 

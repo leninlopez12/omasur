@@ -52,6 +52,70 @@ export class CredentialsController {
   }
 
   // ------------------------------------------------------------------
+  // Credenciales que baja la comisión para enviárselas al tutor.
+  // ------------------------------------------------------------------
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'SUPERVISOR')
+  @Get('delegaciones')
+  delegaciones() {
+    return this.credentials.delegacionesAprobadas();
+  }
+
+  /** Todos los alumnos aprobados de una delegación, en un PDF. */
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'SUPERVISOR')
+  @Get('delegaciones/:tutorId')
+  async credencialesDeDelegacion(
+    @Param('tutorId') tutorId: string,
+    @Query('etapa') etapa: string,
+    @Res() res: Response,
+  ) {
+    const pdf = await this.credentials.credencialesDelTutor(tutorId, { etapa });
+    this.enviar(res, pdf, `credenciales-delegacion-${tutorId}.pdf`);
+  }
+
+  /** La credencial de un tutor, o la de todos en un solo PDF. */
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'SUPERVISOR')
+  @Get('tutores')
+  async credencialesDeTutores(@Query('etapa') etapa: string, @Res() res: Response) {
+    const pdf = await this.credentials.credencialesDeTutores(null, etapa);
+    this.enviar(res, pdf, 'credenciales-de-tutores.pdf');
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'SUPERVISOR')
+  @Get('tutores/:tutorId')
+  async credencialDeTutor(
+    @Param('tutorId') tutorId: string,
+    @Query('etapa') etapa: string,
+    @Res() res: Response,
+  ) {
+    const pdf = await this.credentials.credencialesDeTutores([tutorId], etapa);
+    this.enviar(res, pdf, `credencial-tutor-${tutorId}.pdf`);
+  }
+
+  /** La suya propia, desde el panel del tutor. */
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('TUTOR')
+  @Get('mi-credencial')
+  async miCredencial(
+    @CurrentUser() user: JwtUser,
+    @Query('etapa') etapa: string,
+    @Res() res: Response,
+  ) {
+    const pdf = await this.credentials.credencialDelTutorMismo(user.sub, etapa);
+    this.enviar(res, pdf, 'mi-credencial.pdf');
+  }
+
+  private enviar(res: Response, pdf: Buffer, nombre: string) {
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${nombre}"`);
+    res.end(pdf);
+  }
+
+  // ------------------------------------------------------------------
 
   @Get('consulta/:dni')
   consulta(@Param('dni') dni: string) {

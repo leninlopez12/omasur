@@ -22,6 +22,7 @@ import { FiltrosReporte, ReportesService } from './reportes.service';
 import { InscripcionesService } from './inscripciones.service';
 import { AbonosService, FiltrosAbonos } from './abonos.service';
 import { AlcanceConsolidado, ConsolidadoService } from './consolidado.service';
+import { AccesoService } from './acceso.service';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('ADMIN', 'SUPERVISOR')
@@ -36,6 +37,7 @@ export class AdminController {
     private tabla: InscripcionesService,
     private abonos: AbonosService,
     private consolidado: ConsolidadoService,
+    private acceso: AccesoService,
   ) {}
 
   @Get('metricas')
@@ -212,6 +214,22 @@ export class AdminController {
   // ------------------------------------------------------------------
   // Estado del sistema, respaldo y corrección de datos. Solo administrador.
   // ------------------------------------------------------------------
+
+  // ------------------------------------------------------------------
+  // Entrar a la cuenta de un tutor. Solo el administrador.
+  // ------------------------------------------------------------------
+
+  @Roles('ADMIN')
+  @Get('acceder')
+  tutoresParaAcceder(@Query('buscar') buscar?: string) {
+    return this.acceso.tutores(buscar);
+  }
+
+  @Roles('ADMIN')
+  @Post('acceder/:tutorId')
+  acceder(@Param('tutorId') tutorId: string, @CurrentUser() usuario: JwtUser) {
+    return this.acceso.entrar(tutorId, usuario);
+  }
 
   @Roles('ADMIN')
   @Get('estado')
