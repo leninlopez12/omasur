@@ -37,12 +37,16 @@ export class ExamenController {
   @Roles('TUTOR')
   @Get('estado')
   async estado(@CurrentUser() user: JwtUser) {
-    const [config, entrega] = await Promise.all([
+    const [config, entrega, habilitado] = await Promise.all([
       this.examen.config(),
       this.examen.entregaDe(user.sub),
+      this.examen.habilitada(user.sub),
     ]);
     return {
-      abierto: config.publicado,
+      habilitado,
+      // Para esta delegación el envío solo está abierto si además le toca
+      // rendir: así una sola bandera decide el aviso y la sección entera.
+      abierto: config.publicado && habilitado,
       puntajes: config.puntajes,
       entrega: entrega && {
         enviadoEn: entrega.enviadoEn,
@@ -55,8 +59,8 @@ export class ExamenController {
   @Roles('TUTOR')
   @Get('plantilla')
   async plantilla(@CurrentUser() user: JwtUser, @Res() res: Response) {
-    const buffer = await this.examen.plantilla(user.sub);
-    this.enviarExcel(res, buffer, 'respuestas-examen.xlsx');
+    const { buffer, nombre } = await this.examen.plantilla(user.sub);
+    this.enviarExcel(res, buffer, nombre);
   }
 
   @Roles('TUTOR')
@@ -123,15 +127,15 @@ export class ExamenController {
   @Roles('ADMIN', 'SUPERVISOR')
   @Get('plantilla/:tutorId')
   async plantillaDe(@Param('tutorId') tutorId: string, @Res() res: Response) {
-    const buffer = await this.examen.plantilla(tutorId);
-    this.enviarExcel(res, buffer, 'respuestas-examen-delegacion.xlsx');
+    const { buffer, nombre } = await this.examen.plantilla(tutorId);
+    this.enviarExcel(res, buffer, nombre);
   }
 
   /**
    * La prueba antes de publicar: la comisión sube un Excel de una delegación y
    * ve cómo quedaría corregido, sin guardar nada ni habilitar a nadie.
    */
-  @Roles('ADMIN')
+  @Roles('ADMIN', 'SUPERVISOR')
   @Post('probar')
   @UseInterceptors(RECIBIR)
   probar(@Query('tutorId') tutorId: string, @UploadedFile() archivo: Express.Multer.File) {
@@ -169,6 +173,18 @@ export class ExamenController {
     return this.examen.entregaCompleta(tutorId);
   }
 
+  /** Lo que envió una delegación, en Excel. Con o sin clave y puntaje. */
+  @Roles('ADMIN', 'SUPERVISOR')
+  @Get('entregas/:tutorId/excel')
+  async entregaExcel(
+    @Param('tutorId') tutorId: string,
+    @Query('detalle') detalle: string,
+    @Res() res: Response,
+  ) {
+    const { buffer, nombre } = await this.examen.respuestasExcel(tutorId, detalle !== 'simple');
+    this.enviarExcel(res, buffer, nombre);
+  }
+
   /** Anula el envío para que la delegación pueda volver a mandarlo. */
   @Roles('ADMIN')
   @Delete('entregas/:tutorId')
@@ -192,6 +208,7 @@ export class ExamenController {
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     );
     res.setHeader('Content-Disposition', `attachment; filename="${nombre}"`);
+    res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition');
     res.end(buffer);
   }
 }

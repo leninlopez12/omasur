@@ -1,11 +1,21 @@
 import { useState } from 'react';
-import { ClipboardList, Inbox, Search, Upload } from 'lucide-react';
+import {
+  ClipboardList,
+  FileSpreadsheet,
+  FlaskConical,
+  Inbox,
+  ListChecks,
+  Search,
+  Upload,
+} from 'lucide-react';
 import PanelLayout from '../layouts/PanelLayout.jsx';
 import { ExamenLlenar } from '../components/ExamenDelegacion.jsx';
+import { ExamenClave, ExamenPrueba } from '../components/ExamenConfig.jsx';
 import {
   ExamenConsolidado,
   ExamenConsultas,
   ExamenEntregas,
+  ExamenEnviadas,
 } from '../components/ExamenEntregas.jsx';
 import Campanita from '../components/Campanita.jsx';
 import AvisosEnVivo from '../components/AvisosEnVivo.jsx';
@@ -23,6 +33,9 @@ const SECCIONES = [
   { id: 'entregas', texto: 'Entregas recibidas', icono: Inbox },
   { id: 'consultas', texto: 'Consultas de envíos', icono: Search },
   { id: 'consolidado', texto: 'Consolidado', icono: ClipboardList },
+  { id: 'enviadas', texto: 'Respuestas enviadas', icono: FileSpreadsheet },
+  { id: 'prueba', texto: 'Prueba de envío', icono: FlaskConical },
+  { id: 'clave', texto: 'Respuestas correctas', icono: ListChecks },
 ];
 
 const TITULOS = {
@@ -30,6 +43,9 @@ const TITULOS = {
   entregas: 'Examen · Entregas recibidas',
   consultas: 'Examen · Consultas de envíos',
   consolidado: 'Examen · Consolidado',
+  enviadas: 'Examen · Respuestas enviadas',
+  prueba: 'Examen · Prueba de envío',
+  clave: 'Examen · Respuestas correctas',
 };
 
 export default function PanelSupervisor() {
@@ -58,6 +74,9 @@ function Contenido() {
       {seccion === 'llenar' && <ExamenLlenar />}
       {seccion === 'consultas' && <ExamenConsultas />}
       {seccion === 'consolidado' && <ExamenConsolidado />}
+      {seccion === 'enviadas' && <ExamenEnviadas />}
+      {seccion === 'prueba' && <ExamenPrueba />}
+      {seccion === 'clave' && <ExamenClave />}
     </PanelLayout>
   );
 }

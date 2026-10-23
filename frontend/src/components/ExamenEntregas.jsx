@@ -209,6 +209,163 @@ export function ExamenEntregas() {
 }
 
 /**
+ * Examen · Respuestas enviadas.
+ *
+ * Una fila por delegación que entregó, haya sido el tutor o la comisión, y de
+ * cada una su Excel. El detalle decide si el archivo lleva la clave y el
+ * puntaje o solo lo que mandaron, que es lo que se le puede devolver a un
+ * tutor sin adelantarle resultados.
+ */
+export function ExamenEnviadas() {
+  const [entregas, setEntregas] = useState(null);
+  const [error, setError] = useState('');
+  const [buscar, setBuscar] = useState('');
+  const [llenadoPor, setLlenadoPor] = useState('');
+  const [detalle, setDetalle] = useState('completo');
+  const [bajando, setBajando] = useState('');
+
+  useEffect(() => {
+    api
+      .get('/examen/entregas')
+      .then(({ data }) => setEntregas(data))
+      .catch((e) => setError(mensajeError(e, 'No se pudieron cargar las entregas')));
+  }, []);
+
+  const filtradas = useMemo(() => {
+    if (!entregas) return [];
+    const texto = sinTildes(buscar);
+    return entregas.filter((e) => {
+      if (texto && !sinTildes(e.institucion).includes(texto)) return false;
+      if (llenadoPor === 'tutor' && e.porComision) return false;
+      if (llenadoPor === 'comision' && !e.porComision) return false;
+      return true;
+    });
+  }, [entregas, buscar, llenadoPor]);
+
+  if (error) {
+    return (
+      <Aviso tipo="error" icono={AlertCircle}>
+        {error}
+      </Aviso>
+    );
+  }
+  if (!entregas) return <Cargando texto="Cargando entregas" />;
+
+  const bajar = async (e) => {
+    setBajando(e.tutorId);
+    try {
+      await descargar(`/examen/entregas/${e.tutorId}/excel?detalle=${detalle}`);
+    } finally {
+      setBajando('');
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <Tarjeta>
+        <h3 className="text-3xl font-black text-slate-900">Respuestas enviadas</h3>
+        <p className="mt-2 text-xl text-slate-600">
+          Descargue por delegación lo que entregaron. Elija abajo qué lleva el archivo.
+        </p>
+      </Tarjeta>
+
+      <Filtros buscar={buscar} alBuscar={setBuscar} placeholder="Institución educativa">
+        <Selector
+          etiqueta="Llenado por"
+          compacto
+          value={llenadoPor}
+          onChange={(e) => setLlenadoPor(e.target.value)}
+        >
+          <option value="">Todos</option>
+          <option value="tutor">El tutor</option>
+          <option value="comision">La comisión</option>
+        </Selector>
+        <Selector
+          etiqueta="El Excel lleva"
+          compacto
+          value={detalle}
+          onChange={(e) => setDetalle(e.target.value)}
+        >
+          <option value="completo">Respuestas, clave y puntaje</option>
+          <option value="simple">Solo lo que enviaron</option>
+        </Selector>
+      </Filtros>
+
+      <Tarjeta>
+        {filtradas.length === 0 ? (
+          <Aviso tipo="info" icono={AlertCircle} compacto>
+            Nada que mostrar con estos filtros.
+          </Aviso>
+        ) : (
+          <div className="overflow-x-auto rounded-2xl border-2 border-slate-200">
+            <table className="w-full min-w-[48rem] text-left">
+              <thead className="bg-slate-50">
+                <tr className="text-base text-slate-500">
+                  <th className="px-4 py-3 font-semibold">Delegación</th>
+                  <th className="px-4 py-3 font-semibold">Categorías</th>
+                  <th className="px-4 py-3 text-center font-semibold">Estudiantes</th>
+                  <th className="px-4 py-3 text-center font-semibold">Más alto</th>
+                  <th className="px-4 py-3 font-semibold">Llenado por</th>
+                  <th className="px-4 py-3" />
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {filtradas.map((e) => (
+                  <tr key={e.tutorId}>
+                    <td className="px-4 py-3">
+                      <span className="block text-base font-semibold text-slate-900">
+                        {e.institucion}
+                      </span>
+                      <span className="block text-base text-slate-500">{fecha(e.enviadoEn)}</span>
+                    </td>
+                    <td className="px-4 py-3 text-base text-slate-600">
+                      {e.categorias.join(', ')}
+                    </td>
+                    <td className="px-4 py-3 text-center text-base">{e.total}</td>
+                    <td className="px-4 py-3 text-center text-base font-black text-granate-700">
+                      {e.puntajeAlto}
+                    </td>
+                    <td className="px-4 py-3 text-base">
+                      {e.porComision ? (
+                        <>
+                          <Etiqueta compacto className="bg-amber-100 text-amber-800">
+                            Comisión
+                          </Etiqueta>
+                          {e.registradoPor && (
+                            <span className="mt-1 block text-base text-slate-500">
+                              {e.registradoPor}
+                            </span>
+                          )}
+                        </>
+                      ) : (
+                        <Etiqueta compacto className="bg-emerald-100 text-emerald-800">
+                          Tutor
+                        </Etiqueta>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <Boton
+                        variante="excel"
+                        tamano="chico"
+                        cargando={bajando === e.tutorId}
+                        onClick={() => bajar(e)}
+                      >
+                        <Download className="h-5 w-5" />
+                        Excel
+                      </Boton>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Tarjeta>
+    </div>
+  );
+}
+
+/**
  * Examen · Consultas.
  *
  * Quiénes enviaron y, sobre todo, qué instituciones faltan. Se mide contra

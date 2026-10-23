@@ -32,9 +32,16 @@ export async function descargar(ruta, nombreArchivo) {
   const url = URL.createObjectURL(respuesta.data);
   const enlace = document.createElement('a');
   enlace.href = url;
-  enlace.download = nombreArchivo;
+  enlace.download = nombreArchivo || nombreDeLaRespuesta(respuesta) || 'archivo.xlsx';
   document.body.appendChild(enlace);
   enlace.click();
   enlace.remove();
   URL.revokeObjectURL(url);
+}
+
+/** El nombre que puso el servidor en la cabecera, si lo puso. */
+function nombreDeLaRespuesta(respuesta) {
+  const cabecera = respuesta.headers?.['content-disposition'] || '';
+  const encontrado = /filename="?([^";]+)"?/i.exec(cabecera);
+  return encontrado ? encontrado[1].trim() : '';
 }

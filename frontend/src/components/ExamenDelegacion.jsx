@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { AlertCircle, CheckCircle2, Download, Save, Trash2, Upload } from 'lucide-react';
 import { Aviso, Boton, Cargando, Etiqueta, Selector, Tarjeta } from './Ui.jsx';
 import { COLOR_ALTERNATIVA } from './RespuestasExamen.jsx';
+import { GRADOS } from '../lib/datos';
 import { Filtros, sinTildes } from './ExamenEntregas.jsx';
 import { Confirmado } from './PasoPago.jsx';
 import { api, descargar, mensajeError } from '../lib/api';
@@ -62,8 +63,10 @@ export function SelectorDelegacion({
 
 /** El resultado de una corrección, tal como se verá guardado. */
 export function Corregido({ resultado }) {
+  const categorias = [...new Set(resultado.filas.map((f) => f.categoria))].sort();
+
   return (
-    <div className="mt-8 space-y-5">
+    <div className="mt-8 space-y-6">
       {resultado.sinClave.length > 0 && (
         <Aviso tipo="alerta" icono={AlertCircle} compacto>
           Sin respuestas correctas cargadas para: CAT. {resultado.sinClave.join(', CAT. ')}. El
@@ -86,36 +89,104 @@ export function Corregido({ resultado }) {
         </Aviso>
       )}
 
-      {resultado.filas.length > 0 && (
-        <div className="overflow-x-auto rounded-2xl border-2 border-slate-200">
-          <table className="w-full min-w-[40rem] text-left">
-            <thead className="bg-slate-50">
-              <tr className="text-base text-slate-500">
-                <th className="px-4 py-3 font-semibold">Estudiante</th>
-                <th className="px-4 py-3 text-center font-semibold">Cat.</th>
-                <th className="px-4 py-3 text-center font-semibold">Bien</th>
-                <th className="px-4 py-3 text-center font-semibold">Mal</th>
-                <th className="px-4 py-3 text-center font-semibold">Blanco</th>
-                <th className="px-4 py-3 text-center font-semibold">Puntaje</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {resultado.filas.map((f) => (
-                <tr key={f.dni}>
-                  <td className="px-4 py-3 text-base text-slate-900">{f.nombres}</td>
-                  <td className="px-4 py-3 text-center text-base">{f.categoria}</td>
-                  <td className="px-4 py-3 text-center text-base text-emerald-700">{f.correctas}</td>
-                  <td className="px-4 py-3 text-center text-base text-rose-700">{f.incorrectas}</td>
-                  <td className="px-4 py-3 text-center text-base text-slate-500">{f.blancos}</td>
-                  <td className="px-4 py-3 text-center text-xl font-black text-granate-700">
-                    {f.puntaje}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      {categorias.map((categoria) => (
+        <CategoriaCorregida
+          key={categoria}
+          categoria={categoria}
+          clave={resultado.claves?.[categoria]}
+          alumnos={resultado.filas.filter((f) => f.categoria === categoria)}
+        />
+      ))}
+    </div>
+  );
+}
+
+/** Verde oscuro para lo que estaba bien; lo demás, su color de siempre. */
+function Alternativa({ valor, correcta }) {
+  const acertada = correcta && valor === correcta;
+  return (
+    <span
+      className={`inline-flex h-7 min-w-[1.75rem] items-center justify-center rounded-lg px-1.5 text-sm font-bold ${
+        acertada ? 'bg-emerald-700 text-white' : COLOR_ALTERNATIVA[valor] || COLOR_ALTERNATIVA.BLANCO
+      }`}
+    >
+      {valor === 'BLANCO' ? '–' : valor}
+    </span>
+  );
+}
+
+/** Una categoría del ensayo: primero la clave y debajo lo que marcó cada quien. */
+function CategoriaCorregida({ categoria, clave, alumnos }) {
+  const grado = GRADOS.find((g) => g.categoria === categoria);
+
+  return (
+    <div>
+      <div className="flex flex-wrap items-baseline gap-3">
+        <h4 className="text-2xl font-black text-granate-700">CAT. {categoria}</h4>
+        <span className="text-lg text-slate-600">
+          {grado?.label} · {alumnos.length}{' '}
+          {alumnos.length === 1 ? 'estudiante' : 'estudiantes'}
+        </span>
+      </div>
+
+      {clave ? (
+        <div className="mt-4 rounded-2xl border-2 border-emerald-200 bg-emerald-50 p-4">
+          <p className="text-base font-bold text-emerald-900">Respuestas correctas</p>
+          <div className="mt-2 flex flex-wrap gap-1">
+            {clave.map((valor, i) => (
+              <span key={i} title={`Pregunta ${i + 1}`}>
+                <Alternativa valor={valor} correcta={valor} />
+              </span>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <div className="mt-4">
+          <Aviso tipo="alerta" icono={AlertCircle} compacto>
+            Esta categoría todavía no tiene respuestas correctas cargadas.
+          </Aviso>
         </div>
       )}
+
+      <div className="mt-4 overflow-x-auto rounded-2xl border-2 border-slate-200">
+        <table className="w-full min-w-[46rem] text-left">
+          <thead className="bg-slate-50">
+            <tr className="text-base text-slate-500">
+              <th className="px-4 py-3 font-semibold">Estudiante</th>
+              <th className="px-4 py-3 font-semibold">Lo que marcó</th>
+              <th className="px-4 py-3 text-center font-semibold">Bien</th>
+              <th className="px-4 py-3 text-center font-semibold">Mal</th>
+              <th className="px-4 py-3 text-center font-semibold">Blanco</th>
+              <th className="px-4 py-3 text-center font-semibold">Puntaje</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {alumnos.map((f) => (
+              <tr key={f.dni} className="align-middle">
+                <td className="px-4 py-3">
+                  <span className="block text-base font-bold text-slate-900">{f.nombres}</span>
+                  <span className="block text-base text-slate-500">{f.dni}</span>
+                </td>
+                <td className="px-4 py-3">
+                  <span className="flex flex-wrap gap-1">
+                    {f.respuestas.map((r, i) => (
+                      <span key={i} title={`Pregunta ${i + 1}`}>
+                        <Alternativa valor={r} correcta={clave?.[i]} />
+                      </span>
+                    ))}
+                  </span>
+                </td>
+                <td className="px-4 py-3 text-center text-base text-emerald-700">{f.correctas}</td>
+                <td className="px-4 py-3 text-center text-base text-rose-700">{f.incorrectas}</td>
+                <td className="px-4 py-3 text-center text-base text-slate-500">{f.blancos}</td>
+                <td className="px-4 py-3 text-center text-xl font-black text-granate-700">
+                  {f.puntaje}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
@@ -174,7 +245,7 @@ export function ExamenLlenar() {
   const bajar = async (d) => {
     setProcesando('bajar-' + d.tutorId);
     try {
-      await descargar(`/examen/plantilla/${d.tutorId}`, `respuestas-${d.institucion}.xlsx`);
+      await descargar(`/examen/plantilla/${d.tutorId}`);
     } finally {
       setProcesando('');
     }

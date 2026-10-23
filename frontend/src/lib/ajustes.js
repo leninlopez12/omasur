@@ -18,6 +18,7 @@ const VACIO = {
   bases: null,
   whatsapp: null,
   comunicado: null,
+  tutorialExamen: null,
 };
 
 export function useAjustes() {

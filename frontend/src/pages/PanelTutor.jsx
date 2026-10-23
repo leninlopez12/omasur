@@ -105,9 +105,12 @@ function Contenido() {
       .catch(() => setExamen(null));
   }, [cargar]);
 
-  // Resaltado solo mientras haya algo que hacer: una vez enviadas las
-  // respuestas —o llenadas por la comisión— deja de ser lo urgente.
-  const secciones = SECCIONES.map((s) =>
+  // El examen solo existe para las delegaciones aprobadas; al resto ni se les
+  // nombra. Y se resalta únicamente mientras haya algo que hacer: una vez
+  // enviadas las respuestas —o llenadas por la comisión— deja de ser urgente.
+  const secciones = SECCIONES.filter(
+    (s) => s.id !== 'examen' || examen?.habilitado,
+  ).map((s) =>
     s.id === 'examen' ? { ...s, destacado: Boolean(examen?.abierto && !examen?.entrega) } : s,
   );
 
@@ -151,7 +154,7 @@ function Contenido() {
           )}
           {seccion === 'credenciales' && <SeccionCredenciales resumen={resumen} />}
           {seccion === 'mi-credencial' && <MiCredencial resumen={resumen} />}
-          {seccion === 'examen' && <RespuestasExamen />}
+          {seccion === 'examen' && examen?.habilitado && <RespuestasExamen />}
           {seccion === 'historial' && <MisInscripciones />}
           {seccion === 'datos' && <SeccionDatos resumen={resumen} alCambiar={cargar} />}
         </>

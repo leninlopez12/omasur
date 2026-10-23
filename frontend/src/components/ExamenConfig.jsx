@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertCircle, CheckCircle2, Download, Upload } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Download, Search, Trash2, Upload, Video } from 'lucide-react';
 import { Aviso, Boton, Campo, Cargando, Selector, Tarjeta } from './Ui.jsx';
 import { COLOR_ALTERNATIVA, ICONO_EXCEL } from './RespuestasExamen.jsx';
 import { Corregido, SelectorDelegacion, useDelegaciones } from './ExamenDelegacion.jsx';
+import { sinTildes } from './ExamenEntregas.jsx';
 import { api, descargar, mensajeError } from '../lib/api';
+import { useAjustes } from '../lib/ajustes';
 import { GRADOS } from '../lib/datos';
 
 export const ALTERNATIVAS = ['A', 'B', 'C', 'D', 'E', 'BLANCO'];
@@ -105,7 +107,8 @@ export function ExamenRespuestas() {
             <div>
               <h3 className="text-3xl font-black text-slate-900">Respuestas correctas</h3>
               <p className="mt-2 text-xl text-slate-600">
-                Marque la clave de cada categoría y abra el envío.
+                Marque la clave de cada categoría y abra el envío. Si corrige una respuesta
+                después, todo lo ya entregado se vuelve a calificar solo.
               </p>
             </div>
           </div>
@@ -232,7 +235,7 @@ export function ExamenPuntaje() {
     <Tarjeta>
       <h3 className="text-3xl font-black text-slate-900">Puntaje</h3>
       <p className="mt-2 text-xl text-slate-600">
-        Se aplica al corregir. Si lo cambia, vuelva a pedirle el archivo a quien ya envió.
+        Se aplica a todo, también a lo ya entregado: al cambiarlo se recalculan los puntajes.
       </p>
 
       <div className="mt-8 grid gap-5 sm:grid-cols-3">
@@ -290,6 +293,7 @@ export function ExamenPuntaje() {
 export function ExamenPrueba() {
   const { delegaciones, error: errorLista } = useDelegaciones();
   const [tutorId, setTutorId] = useState('');
+  const [buscar, setBuscar] = useState('');
   const [resultado, setResultado] = useState(null);
   const [error, setError] = useState('');
   const [procesando, setProcesando] = useState('');
@@ -317,7 +321,16 @@ export function ExamenPrueba() {
     );
   }
 
-  const elegida = tutorId || delegaciones[0].tutorId;
+  const texto = sinTildes(buscar);
+  const filtradas = texto
+    ? delegaciones.filter((d) => sinTildes(`${d.institucion} ${d.tutor}`).includes(texto))
+    : delegaciones;
+
+  // Si lo que se buscó deja fuera a la elegida, manda la primera del filtro:
+  // así no se ensaya con una delegación que ya no está en pantalla.
+  const elegida = filtradas.some((d) => d.tutorId === tutorId)
+    ? tutorId
+    : filtradas[0]?.tutorId || '';
 
   const subir = async (evento) => {
     const archivo = evento.target.files?.[0];
@@ -346,16 +359,32 @@ export function ExamenPrueba() {
       </p>
 
       <div className="mt-8 grid gap-5 md:grid-cols-2">
-        <SelectorDelegacion delegaciones={delegaciones} value={elegida} onChange={setTutorId} />
+        <Campo
+          etiqueta="Buscar delegación"
+          icono={Search}
+          placeholder="Institución o tutor"
+          value={buscar}
+          onChange={(e) => setBuscar(e.target.value)}
+        />
+        {filtradas.length === 0 ? (
+          <div className="flex items-end">
+            <Aviso tipo="info" icono={AlertCircle} compacto>
+              Ninguna delegación coincide con lo buscado.
+            </Aviso>
+          </div>
+        ) : (
+          <SelectorDelegacion delegaciones={filtradas} value={elegida} onChange={setTutorId} />
+        )}
 
         <div className="flex flex-wrap items-end gap-3">
           <Boton
             variante="excel"
+            disabled={!elegida}
             cargando={procesando === 'bajar'}
             onClick={async () => {
               setProcesando('bajar');
               try {
-                await descargar(`/examen/plantilla/${elegida}`, 'respuestas-prueba.xlsx');
+                await descargar(`/examen/plantilla/${elegida}`);
               } finally {
                 setProcesando('');
               }
@@ -366,6 +395,7 @@ export function ExamenPrueba() {
           </Boton>
           <Boton
             variante="contorno"
+            disabled={!elegida}
             cargando={procesando === 'subir'}
             onClick={() => archivoRef.current?.click()}
           >
@@ -391,6 +421,234 @@ export function ExamenPrueba() {
       )}
 
       {resultado && <Corregido resultado={resultado} />}
+    </Tarjeta>
+  );
+}
+
+/** Los rótulos cortos del cuadro de claves: 3P, 4P … 5S. */
+const CORTO = {
+  A: '3P',
+  B: '4P',
+  C: '5P',
+  D: '6P',
+  E: '1S',
+  F: '2S',
+  G: '3S',
+  H: '4S',
+  I: '5S',
+};
+
+/**
+ * Examen · Respuestas correctas, de solo lectura.
+ *
+ * Es la misma clave que carga el administrador, en el cuadro de siempre: una
+ * fila por pregunta y una columna por categoría. Aquí no se toca nada, y por
+ * eso el supervisor puede consultarla sin riesgo de alterarla.
+ */
+export function ExamenClave() {
+  const { config, error } = useConfigExamen();
+
+  if (error && !config) {
+    return (
+      <Aviso tipo="error" icono={AlertCircle}>
+        {error}
+      </Aviso>
+    );
+  }
+  if (!config) return <Cargando texto="Cargando las respuestas" />;
+
+  const conClave = GRADOS.filter((g) => config.claves[g.categoria]);
+
+  return (
+    <Tarjeta>
+      <h3 className="text-3xl font-black text-slate-900">Respuestas correctas</h3>
+      <p className="mt-2 text-xl text-slate-600">
+        Solo para consultarlas. Las carga el administrador.
+      </p>
+
+      {conClave.length === 0 ? (
+        <div className="mt-6">
+          <Aviso tipo="info" icono={AlertCircle} compacto>
+            Todavía no hay respuestas cargadas.
+          </Aviso>
+        </div>
+      ) : (
+        <div className="mt-8 overflow-x-auto rounded-2xl border-2 border-slate-300">
+          <table className="w-full min-w-[36rem] border-collapse text-center">
+            <thead>
+              <tr className="bg-yellow-300">
+                <th className="border border-slate-300 px-3 py-2 text-left text-base font-black text-slate-900">
+                  PREGUNTA
+                </th>
+                {conClave.map((g) => (
+                  <th
+                    key={g.categoria}
+                    title={g.label}
+                    className="border border-slate-300 px-3 py-2 text-base font-black text-slate-900"
+                  >
+                    {CORTO[g.categoria]}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {Array.from({ length: PREGUNTAS }, (_, i) => (
+                <tr key={i} className="odd:bg-white even:bg-slate-50">
+                  <td className="border border-slate-300 px-3 py-1.5 text-base font-black text-rose-600">
+                    {i + 1}
+                  </td>
+                  {conClave.map((g) => {
+                    const valor = config.claves[g.categoria][i];
+                    return (
+                      <td
+                        key={g.categoria}
+                        className="border border-slate-300 px-3 py-1.5 text-base font-black text-rose-600"
+                      >
+                        {valor === 'BLANCO' ? '–' : valor}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Tarjeta>
+  );
+}
+
+/**
+ * Examen · Video tutorial.
+ *
+ * El video vive en Cloudflare, igual que las bases. Mientras no haya uno, el
+ * aviso que recibe el tutor no muestra el botón «Ver tutorial».
+ */
+export function ExamenTutorial() {
+  const { ajustes, recargar } = useAjustes();
+  const [archivo, setArchivo] = useState(null);
+  const [error, setError] = useState('');
+  const [mensaje, setMensaje] = useState('');
+  const [procesando, setProcesando] = useState('');
+  const archivoRef = useRef(null);
+
+  const video = ajustes.archivos?.tutorial || null;
+
+  const subir = async () => {
+    if (!archivo) return setError('Elija el video');
+    setError('');
+    setMensaje('');
+    setProcesando('subir');
+    try {
+      const formulario = new FormData();
+      formulario.append('archivo', archivo);
+      await api.post('/ajustes/tutorial', formulario);
+      setArchivo(null);
+      if (archivoRef.current) archivoRef.current.value = '';
+      setMensaje('Tutorial publicado: los tutores ya ven el botón «Ver tutorial»');
+      await recargar();
+    } catch (e) {
+      setError(mensajeError(e, 'No se pudo subir el video'));
+    } finally {
+      setProcesando('');
+    }
+  };
+
+  const quitar = async () => {
+    if (!window.confirm('¿Quitar el tutorial? El botón desaparecerá del aviso.')) return;
+    setError('');
+    setMensaje('');
+    setProcesando('quitar');
+    try {
+      await api.delete('/ajustes/tutorial');
+      setMensaje('Tutorial retirado');
+      await recargar();
+    } catch (e) {
+      setError(mensajeError(e, 'No se pudo quitar el video'));
+    } finally {
+      setProcesando('');
+    }
+  };
+
+  return (
+    <Tarjeta>
+      <h3 className="text-3xl font-black text-slate-900">Video tutorial</h3>
+      <p className="mt-2 text-xl text-slate-600">
+        Video MP4 o WEBM, hasta 100 MB. Aparece como «Ver tutorial» en el aviso del examen.
+      </p>
+
+      <div className="mt-8 rounded-2xl border-2 border-slate-200 p-6">
+        {video ? (
+          <>
+            <div className="flex flex-wrap items-center gap-5">
+              <span className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-granate-50">
+                <Video className="h-9 w-9 text-granate-600" />
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-xl font-black text-slate-900">{video.nombre}</p>
+                <p className="mt-1 text-base text-slate-600">
+                  {Math.max(1, Math.round(video.tamano / 1024 / 1024))} MB
+                </p>
+              </div>
+            </div>
+            <video src={video.url} controls className="mt-6 w-full rounded-2xl bg-slate-900" />
+          </>
+        ) : (
+          <p className="text-xl text-slate-500">
+            Todavía no hay tutorial: el botón no se muestra en el aviso.
+          </p>
+        )}
+      </div>
+
+      <div className="mt-6 space-y-5">
+        <button
+          type="button"
+          onClick={() => archivoRef.current?.click()}
+          className="flex w-full items-center justify-center gap-3 rounded-2xl border-2 border-dashed border-granate-300 bg-granate-50 px-5 py-6 transition hover:border-granate-500 hover:bg-granate-100"
+        >
+          <Upload className="h-7 w-7 text-granate-600" />
+          <span className="text-base font-semibold text-granate-700">
+            {archivo ? archivo.name : 'Toque para elegir el video'}
+          </span>
+        </button>
+        <input
+          ref={archivoRef}
+          type="file"
+          accept="video/mp4,video/webm,.mp4,.webm"
+          className="hidden"
+          onChange={(e) => {
+            const elegido = e.target.files?.[0];
+            if (!elegido) return;
+            setError('');
+            setMensaje('');
+            setArchivo(elegido);
+          }}
+        />
+
+        {error && (
+          <Aviso tipo="error" icono={AlertCircle}>
+            {error}
+          </Aviso>
+        )}
+        {mensaje && (
+          <Aviso tipo="exito" icono={CheckCircle2}>
+            {mensaje}
+          </Aviso>
+        )}
+
+        <div className="flex flex-wrap gap-3">
+          <Boton cargando={procesando === 'subir'} onClick={subir}>
+            <Upload className="h-6 w-6" />
+            {video ? 'Reemplazar tutorial' : 'Publicar tutorial'}
+          </Boton>
+          {video && (
+            <Boton variante="contorno" cargando={procesando === 'quitar'} onClick={quitar}>
+              <Trash2 className="h-6 w-6" />
+              Quitar
+            </Boton>
+          )}
+        </div>
+      </div>
     </Tarjeta>
   );
 }

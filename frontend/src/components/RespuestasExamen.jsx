@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertCircle, Download, FileSpreadsheet, Send, Upload } from 'lucide-react';
+import { AlertCircle, Download, FileSpreadsheet, PlayCircle, Send, Upload } from 'lucide-react';
 import { Aviso, Boton, Cargando, Tarjeta } from './Ui.jsx';
 import { Confirmado, SelloConfirmado } from './PasoPago.jsx';
 import { api, descargar, mensajeError } from '../lib/api';
+import { useAjustes } from '../lib/ajustes';
+import { GRADOS } from '../lib/datos';
 
 export const ICONO_EXCEL = '/api/publico/iconos/excel.png';
 
@@ -52,7 +54,7 @@ export default function RespuestasExamen() {
     setError('');
     setProcesando('bajar');
     try {
-      await descargar('/examen/plantilla', 'respuestas-examen.xlsx');
+      await descargar('/examen/plantilla');
     } catch (e) {
       setError(mensajeError(e, 'No se pudo descargar el Excel'));
     } finally {
@@ -242,6 +244,13 @@ function Revision({ revision, enviando, alEnviar }) {
   const { filas, errores, faltantes } = revision;
   const hayErrores = errores.length > 0;
 
+  // Una tabla por categoría y no una sola lista: el tutor revisa el examen
+  // que acaba de rendir cada grado, y mezclarlos obliga a buscar fila por fila.
+  const categorias = [...new Set(filas.map((f) => f.categoria))].sort().map((categoria) => ({
+    categoria,
+    alumnos: filas.filter((f) => f.categoria === categoria),
+  }));
+
   return (
     <Tarjeta>
       <h3 className="text-3xl font-black text-slate-900">3 · Revise y envíe</h3>
@@ -274,49 +283,9 @@ function Revision({ revision, enviando, alEnviar }) {
         </div>
       )}
 
-      {filas.length > 0 && (
-        <div className="mt-8 overflow-x-auto rounded-2xl border-2 border-slate-200">
-          <table className="w-full min-w-[48rem] text-left">
-            <thead className="bg-slate-50">
-              <tr className="text-base text-slate-500">
-                <th className="px-4 py-3 font-semibold">Estudiante</th>
-                <th className="px-4 py-3 text-center font-semibold">Cat.</th>
-                <th className="px-4 py-3 font-semibold">Respuestas</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {filas.map((fila) => (
-                <tr key={fila.dni} className="align-middle">
-                  <td className="px-4 py-3">
-                    <span className="block text-base font-bold text-slate-900">
-                      {fila.nombres}
-                    </span>
-                    <span className="block text-base text-slate-500">{fila.dni}</span>
-                  </td>
-                  <td className="px-4 py-3 text-center text-base font-black text-granate-700">
-                    {fila.categoria}
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className="flex flex-wrap gap-1">
-                      {fila.respuestas.map((r, i) => (
-                        <span
-                          key={i}
-                          title={`Pregunta ${i + 1}`}
-                          className={`inline-flex h-7 min-w-[1.75rem] items-center justify-center rounded-lg px-1.5 text-sm font-bold ${
-                            COLOR_ALTERNATIVA[r] || COLOR_ALTERNATIVA.BLANCO
-                          }`}
-                        >
-                          {r === 'BLANCO' ? '–' : r}
-                        </span>
-                      ))}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+      {categorias.map(({ categoria, alumnos }) => (
+        <PorCategoria key={categoria} categoria={categoria} alumnos={alumnos} />
+      ))}
 
       <div className="mt-8 flex justify-end">
         <Boton tamano="grande" cargando={enviando} disabled={hayErrores || filas.length === 0} onClick={alEnviar}>
@@ -325,6 +294,59 @@ function Revision({ revision, enviando, alEnviar }) {
         </Boton>
       </div>
     </Tarjeta>
+  );
+}
+
+/** El bloque de una categoría dentro de la revisión. */
+function PorCategoria({ categoria, alumnos }) {
+  const grado = GRADOS.find((g) => g.categoria === categoria);
+
+  return (
+    <div className="mt-8">
+      <div className="flex flex-wrap items-baseline gap-3">
+        <h4 className="text-2xl font-black text-granate-700">CAT. {categoria}</h4>
+        <span className="text-lg text-slate-600">
+          {grado?.label} · {alumnos.length}{' '}
+          {alumnos.length === 1 ? 'estudiante' : 'estudiantes'}
+        </span>
+      </div>
+
+      <div className="mt-4 overflow-x-auto rounded-2xl border-2 border-slate-200">
+        <table className="w-full min-w-[44rem] text-left">
+          <thead className="bg-slate-50">
+            <tr className="text-base text-slate-500">
+              <th className="px-4 py-3 font-semibold">Estudiante</th>
+              <th className="px-4 py-3 font-semibold">Respuestas</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {alumnos.map((fila) => (
+              <tr key={fila.dni} className="align-middle">
+                <td className="px-4 py-3">
+                  <span className="block text-base font-bold text-slate-900">{fila.nombres}</span>
+                  <span className="block text-base text-slate-500">{fila.dni}</span>
+                </td>
+                <td className="px-4 py-3">
+                  <span className="flex flex-wrap gap-1">
+                    {fila.respuestas.map((r, i) => (
+                      <span
+                        key={i}
+                        title={`Pregunta ${i + 1}`}
+                        className={`inline-flex h-7 min-w-[1.75rem] items-center justify-center rounded-lg px-1.5 text-sm font-bold ${
+                          COLOR_ALTERNATIVA[r] || COLOR_ALTERNATIVA.BLANCO
+                        }`}
+                      >
+                        {r === 'BLANCO' ? '–' : r}
+                      </span>
+                    ))}
+                  </span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }
 
@@ -337,6 +359,8 @@ function Revision({ revision, enviando, alEnviar }) {
  */
 export function AvisoExamen({ abierto, yaEnvio, alIr }) {
   const [cerrado, setCerrado] = useState(false);
+  const { ajustes } = useAjustes();
+  const tutorial = ajustes.tutorialExamen;
 
   const cerrar = () => setCerrado(true);
 
@@ -375,7 +399,7 @@ export function AvisoExamen({ abierto, yaEnvio, alIr }) {
               variante="excel"
               className="animate-latido"
               onClick={async () => {
-                await descargar('/examen/plantilla', 'respuestas-examen.xlsx');
+                await descargar('/examen/plantilla');
               }}
             >
               <FileSpreadsheet className="h-6 w-6" />
@@ -392,9 +416,21 @@ export function AvisoExamen({ abierto, yaEnvio, alIr }) {
             </Boton>
           </div>
 
+          {tutorial && (
+            <a
+              href={tutorial}
+              target="_blank"
+              rel="noreferrer"
+              className="mt-6 inline-flex items-center justify-center gap-2 text-lg font-bold text-granate-700 underline underline-offset-4 transition hover:text-granate-900"
+            >
+              <PlayCircle className="h-6 w-6" />
+              Ver tutorial
+            </a>
+          )}
+
           <button
             onClick={cerrar}
-            className="mt-6 text-lg font-semibold text-slate-500 transition hover:text-slate-700"
+            className="mt-6 block w-full text-lg font-semibold text-slate-500 transition hover:text-slate-700"
           >
             Después
           </button>

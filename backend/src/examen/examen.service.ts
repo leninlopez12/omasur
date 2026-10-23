@@ -31,6 +31,9 @@ const MODALIDADES: Record<string, string> = {
   GRUPO_ESTUDIO: 'Grupo de estudio',
 };
 
+/** El verde con el que se marca la alternativa acertada. */
+const VERDE_ACIERTO = 'FF047857';
+
 const CLAVE_CONFIG = 'examen_config';
 const CLAVE_RESPUESTAS = (tutorId: string) => `examen_respuestas_${tutorId}`;
 
@@ -179,7 +182,7 @@ export class ExamenService {
    * Los nombres vienen puestos y las celdas traen lista desplegable: el tutor
    * solo elige, no escribe. Es lo que evita la mitad de los errores.
    */
-  async plantilla(tutorId: string): Promise<Buffer> {
+  async plantilla(tutorId: string): Promise<{ buffer: Buffer; nombre: string }> {
     const { tutor, porCategoria } = await this.delegacion(tutorId);
 
     const libro = new ExcelJS.Workbook();
@@ -286,7 +289,26 @@ export class ExamenService {
       hoja.getCell('A1').value = 'Su delegación todavía no tiene estudiantes aprobados.';
     }
 
-    return (await libro.xlsx.writeBuffer()) as unknown as Buffer;
+    return {
+      buffer: (await libro.xlsx.writeBuffer()) as unknown as Buffer,
+      nombre: this.nombrePlantilla(tutor.institucion),
+    };
+  }
+
+  /**
+   * El archivo viaja por correo y por WhatsApp entre delegaciones: si todos se
+   * llaman igual, alguien termina subiendo el de otra institución.
+   */
+  private nombrePlantilla(institucion: string | null) {
+    const limpia = (institucion || 'SIN INSTITUCION')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-zA-Z0-9 .-]/g, '')
+      .trim()
+      .slice(0, 60)
+      .toUpperCase();
+
+    return `PLANTILLA DE RESPUESTAS - ${limpia || 'SIN INSTITUCION'}.xlsx`;
   }
 
   // -------------------------------------------------------------------- lectura
@@ -365,6 +387,13 @@ export class ExamenService {
       errores,
       faltantes,
       puntajes: config.puntajes,
+      // Solo la de las categorías que trae el archivo: con esto la pantalla
+      // puede resaltar la alternativa correcta sin pedir nada más.
+      claves: Object.fromEntries(
+        [...new Set(corregidos.map((c) => c.categoria))]
+          .filter((c) => config.claves[c])
+          .map((c) => [c, config.claves[c]]),
+      ),
       sinClave: corregidos
         .map((c) => c.categoria)
         .filter((c, i, todas) => todas.indexOf(c) === i && !config.claves[c]),
@@ -419,29 +448,70 @@ export class ExamenService {
     return { ok: true, total: revision.filas.length, enviadoEn: registro.enviadoEn };
   }
 
-  /** Lo que una delegación ya entregó, si entregó algo. */
-  async entregaDe(tutorId: string) {
+  /**
+   * ¿Esta delegación rinde el examen?
+   *
+   * Solo las aprobadas y con alumnos aprobados: a quien no llegó a inscribirse
+   * no se le ofrece enviar respuestas de nadie.
+   */
+  async habilitada(tutorId: string) {
+    const tutor = await this.prisma.tutor.findUnique({
+      where: { id: tutorId },
+      select: { estado: true },
+    });
+    if (tutor?.estado !== 'APROBADA') return false;
+
+    const alumnos = await this.prisma.student.count({
+      where: { tutorId, payment: { estado: 'APROBADO' } },
+    });
+    return alumnos > 0;
+  }
+
+  /**
+   * Lo que una delegación ya entregó, si entregó algo.
+   *
+   * Lo que se guardó son las alternativas que marcó cada estudiante; el
+   * puntaje se vuelve a sacar aquí con la clave de ahora. Así, si la comisión
+   * corrige una respuesta mal cargada, las delegaciones que ya enviaron no
+   * quedan con la nota vieja ni tienen que volver a mandar nada.
+   */
+  async entregaDe(tutorId: string, config?: ConfigExamen) {
     const fila = await this.prisma.ajuste.findUnique({
       where: { clave: CLAVE_RESPUESTAS(tutorId) },
     });
     if (!fila?.valor) return null;
+
     try {
-      return JSON.parse(fila.valor);
+      return this.recorregir(JSON.parse(fila.valor), config ?? (await this.config()));
     } catch {
       return null;
     }
   }
 
+  /** Vuelve a calificar lo entregado con la clave y el puntaje vigentes. */
+  private recorregir(entrega: any, config: ConfigExamen) {
+    const filas: Corregido[] = entrega?.filas || [];
+
+    return {
+      ...entrega,
+      puntajes: config.puntajes,
+      filas: filas.map((f) =>
+        this.corregir({ dni: f.dni, nombres: f.nombres }, f.categoria, f.respuestas, config),
+      ),
+    };
+  }
+
   /** Qué delegaciones ya entregaron. Para la comisión. */
   async entregas(): Promise<Entrega[]> {
-    const filas = await this.prisma.ajuste.findMany({
-      where: { clave: { startsWith: 'examen_respuestas_' } },
-    });
+    const [filas, config] = await Promise.all([
+      this.prisma.ajuste.findMany({ where: { clave: { startsWith: 'examen_respuestas_' } } }),
+      this.config(),
+    ]);
 
     return filas
       .map((f) => {
         try {
-          const d = JSON.parse(f.valor);
+          const d = this.recorregir(JSON.parse(f.valor), config);
           const lista: Corregido[] = d.filas || [];
           const puntajes = lista.map((c) => c.puntaje);
           return {
@@ -618,11 +688,11 @@ export class ExamenService {
 
   /** Todo lo recibido: delegación por delegación y alumno por alumno. */
   async consolidado() {
-    const entregas = await this.entregas();
+    const [entregas, config] = await Promise.all([this.entregas(), this.config()]);
     const alumnos: (Corregido & { institucion: string; porComision: boolean })[] = [];
 
     for (const e of entregas) {
-      const entrega = await this.entregaDe(e.tutorId);
+      const entrega = await this.entregaDe(e.tutorId, config);
       for (const fila of entrega?.filas || []) {
         alumnos.push({ ...fila, institucion: e.institucion, porComision: e.porComision });
       }
@@ -751,6 +821,141 @@ export class ExamenService {
       buffer: (await libro.xlsx.writeBuffer()) as unknown as Buffer,
       nombre: nombreArchivo('consolidado-respuestas-examen'),
     };
+  }
+
+  // --------------------------------------------------- respuestas enviadas
+
+  /**
+   * El Excel de lo que entregó una delegación.
+   *
+   * `completo` decide si lleva la clave y el puntaje o solo las alternativas
+   * que mandaron: lo segundo sirve para devolvérselo al tutor y que confirme
+   * lo que envió, sin adelantarle resultados.
+   */
+  async respuestasExcel(
+    tutorId: string,
+    completo: boolean,
+  ): Promise<{ buffer: Buffer; nombre: string }> {
+    const config = await this.config();
+    const entrega = await this.entregaDe(tutorId, config);
+    if (!entrega) throw new NotFoundException('Esta delegación todavía no envió respuestas');
+
+    const filas: Corregido[] = entrega.filas || [];
+    const categorias = [...new Set(filas.map((f) => f.categoria))].sort();
+
+    const libro = new ExcelJS.Workbook();
+    libro.creator = 'I OMASUR UNI 2026';
+
+    for (const categoria of categorias) {
+      const grado = GRADOS.find((g) => g.categoria === categoria);
+      const clave = config.claves[categoria];
+      const hoja = libro.addWorksheet(`CAT. ${categoria}`);
+
+      const columnas = [
+        { header: 'N°', width: 6 },
+        { header: 'DNI', width: 14 },
+        { header: 'APELLIDOS Y NOMBRES', width: 38 },
+        ...Array.from({ length: PREGUNTAS }, (_, i) => ({ header: `P${i + 1}`, width: 5 })),
+        ...(completo
+          ? [
+              { header: 'BIEN', width: 8 },
+              { header: 'MAL', width: 8 },
+              { header: 'BLANCO', width: 10 },
+              { header: 'PUNTAJE', width: 12 },
+            ]
+          : []),
+      ];
+
+      // Con puntaje se ordena de mayor a menor; sin él no habría nada que ese
+      // orden explique, así que va por nombre.
+      const suyos = filas
+        .filter((f) => f.categoria === categoria)
+        .sort((a, b) =>
+          completo
+            ? b.puntaje - a.puntaje || a.nombres.localeCompare(b.nombres, 'es')
+            : a.nombres.localeCompare(b.nombres, 'es'),
+        );
+
+      escribirTitulo(
+        hoja,
+        columnas.length,
+        `${entrega.institucion} · CAT. ${categoria} · ${grado?.label || ''}`,
+        completo
+          ? 'Respuestas enviadas, respuesta correcta y puntaje'
+          : 'Respuestas enviadas por la delegación',
+        suyos.length,
+      );
+      escribirEncabezados(hoja, columnas);
+
+      if (completo && clave) {
+        const fila = hoja.addRow([
+          '',
+          '',
+          'RESPUESTA CORRECTA',
+          ...clave,
+          ...(completo ? ['', '', '', ''] : []),
+        ]);
+        fila.font = { bold: true };
+        fila.getCell(3).alignment = { horizontal: 'right' };
+        for (let c = 4; c < 4 + PREGUNTAS; c++) this.pintar(fila.getCell(c), clave[c - 4], true);
+      }
+
+      suyos.forEach((alumno, i) => {
+        const fila = hoja.addRow([
+          i + 1,
+          alumno.dni,
+          alumno.nombres,
+          ...alumno.respuestas,
+          ...(completo
+            ? [alumno.correctas, alumno.incorrectas, alumno.blancos, alumno.puntaje]
+            : []),
+        ]);
+        fila.getCell(2).numFmt = '@';
+
+        for (let c = 4; c < 4 + PREGUNTAS; c++) {
+          const valor = alumno.respuestas[c - 4];
+          this.pintar(fila.getCell(c), valor, completo && clave?.[c - 4] === valor);
+        }
+
+        if (completo) {
+          const puntaje = fila.getCell(4 + PREGUNTAS + 3);
+          puntaje.font = { bold: true, color: { argb: GRANATE } };
+        }
+      });
+    }
+
+    if (categorias.length === 0) {
+      libro.addWorksheet('Sin datos').getCell('A1').value = 'La entrega no tiene respuestas.';
+    }
+
+    return {
+      buffer: (await libro.xlsx.writeBuffer()) as unknown as Buffer,
+      nombre: this.nombreEnviadas(entrega.institucion, completo),
+    };
+  }
+
+  /** Verde oscuro para la acertada; su color de siempre para el resto. */
+  private pintar(celda: ExcelJS.Cell, valor: string, acertada: boolean) {
+    celda.alignment = { horizontal: 'center', vertical: 'middle' };
+    celda.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: acertada ? VERDE_ACIERTO : COLORES[valor as Alternativa] || COLORES.BLANCO },
+    };
+    if (acertada) celda.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+  }
+
+  private nombreEnviadas(institucion: string, completo: boolean) {
+    const limpia = (institucion || 'SIN INSTITUCION')
+      .normalize('NFD')
+      .replace(/[̀-ͯ]/g, '')
+      .replace(/[^a-zA-Z0-9 .-]/g, '')
+      .trim()
+      .slice(0, 60)
+      .toUpperCase();
+
+    const que = completo ? 'RESPUESTAS Y PUNTAJES' : 'RESPUESTAS ENVIADAS';
+    return `${que} - ${limpia || 'SIN INSTITUCION'}.xlsx`;
   }
 
   // --------------------------------------------------------------------- apoyo

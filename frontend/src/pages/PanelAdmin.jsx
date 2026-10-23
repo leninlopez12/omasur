@@ -32,6 +32,7 @@ import {
   UserCog,
   Upload,
   UserCheck,
+  Video,
   Users,
   Wallet,
 } from 'lucide-react';
@@ -70,7 +71,12 @@ import Consolidado from '../components/Consolidado.jsx';
 import Acceder from '../components/Acceder.jsx';
 import EtapasCredencial from '../components/EtapasCredencial.jsx';
 import Comunicados from '../components/Comunicados.jsx';
-import { ExamenPrueba, ExamenPuntaje, ExamenRespuestas } from '../components/ExamenConfig.jsx';
+import {
+  ExamenPrueba,
+  ExamenPuntaje,
+  ExamenRespuestas,
+  ExamenTutorial,
+} from '../components/ExamenConfig.jsx';
 import {
   ExamenAnular,
   ExamenCorregir,
@@ -80,6 +86,7 @@ import {
   ExamenConsolidado,
   ExamenConsultas,
   ExamenEntregas,
+  ExamenEnviadas,
 } from '../components/ExamenEntregas.jsx';
 import CredencialesComision from '../components/CredencialesComision.jsx';
 
@@ -98,6 +105,8 @@ const SECCIONES = [
       { id: 'examen-corregir', texto: 'Corregir respuestas', icono: PencilLine },
       { id: 'examen-consultas', texto: 'Consultas de envíos', icono: Search },
       { id: 'examen-consolidado', texto: 'Consolidado', icono: ClipboardList },
+      { id: 'examen-enviadas', texto: 'Respuestas enviadas', icono: FileSpreadsheet },
+      { id: 'examen-tutorial', texto: 'Video tutorial', icono: Video },
     ],
   },
   { id: 'tablero', texto: 'Tablero', icono: LayoutDashboard },
@@ -155,6 +164,8 @@ const TITULOS = {
   'examen-corregir': 'Examen · Corregir respuestas',
   'examen-consultas': 'Examen · Consultas de envíos',
   'examen-consolidado': 'Examen · Consolidado',
+  'examen-enviadas': 'Examen · Respuestas enviadas',
+  'examen-tutorial': 'Examen · Video tutorial',
   tablero: 'Tablero general',
   'revisar-alumnos': 'Inscripciones por alumno',
   inscripciones: 'Delegaciones',
@@ -229,6 +240,8 @@ function Contenido() {
       {seccion === 'examen-corregir' && <ExamenCorregir />}
       {seccion === 'examen-consultas' && <ExamenConsultas />}
       {seccion === 'examen-consolidado' && <ExamenConsolidado />}
+      {seccion === 'examen-enviadas' && <ExamenEnviadas />}
+      {seccion === 'examen-tutorial' && <ExamenTutorial />}
 
       {seccion === 'tablero' && (
         <Tablero

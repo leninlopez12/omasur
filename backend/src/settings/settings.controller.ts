@@ -27,16 +27,25 @@ import { Roles } from '../common/decorators';
  * queda en el disco del servidor, que en producción se pierde en cada
  * despliegue.
  */
-function recibir(formato: 'imagen' | 'pdf') {
-  const valido = formato === 'pdf' ? /\.pdf$/i : /\.(jpg|jpeg|png|webp)$/i;
-  const aviso =
-    formato === 'pdf'
-      ? 'Las bases deben ser un archivo PDF'
-      : 'Solo se aceptan imágenes JPG, PNG o WEBP';
+function recibir(formato: 'imagen' | 'pdf' | 'video') {
+  const EXTENSIONES = {
+    pdf: /\.pdf$/i,
+    video: /\.(mp4|webm)$/i,
+    imagen: /\.(jpg|jpeg|png|webp)$/i,
+  };
+  const AVISOS = {
+    pdf: 'Las bases deben ser un archivo PDF',
+    video: 'El tutorial debe ser un video MP4 o WEBM',
+    imagen: 'Solo se aceptan imágenes JPG, PNG o WEBP',
+  };
+  const TOPES = { pdf: 20, video: 100, imagen: 8 };
+
+  const valido = EXTENSIONES[formato];
+  const aviso = AVISOS[formato];
 
   return FileInterceptor('archivo', {
     storage: memoryStorage(),
-    limits: { fileSize: (formato === 'pdf' ? 20 : 8) * 1024 * 1024 },
+    limits: { fileSize: TOPES[formato] * 1024 * 1024 },
     fileFilter: (_req, file, cb) => {
       if (!valido.test(file.originalname)) return cb(new BadRequestException(aviso), false);
       cb(null, true);
@@ -164,6 +173,30 @@ export class SettingsController {
   }
 
   // --------------------------------------------------------------------
+  // Video tutorial del examen
+  // --------------------------------------------------------------------
+
+  @Get('tutorial')
+  verTutorial(@Res({ passthrough: false }) res: Response) {
+    return this.entregar('tutorial', res);
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN')
+  @Post('tutorial')
+  @UseInterceptors(recibir('video'))
+  guardarTutorial(@UploadedFile() archivo: Express.Multer.File) {
+    return this.settings.guardarArchivo('tutorial', archivo);
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN')
+  @Delete('tutorial')
+  quitarTutorial() {
+    return this.settings.quitarArchivo('tutorial');
+  }
+
+  // --------------------------------------------------------------------
   // Bases del concurso
   // --------------------------------------------------------------------
 
@@ -199,7 +232,9 @@ export class SettingsController {
     const archivo = await this.almacenamiento.leer(datos.referencia);
     if (!archivo) throw new NotFoundException('Archivo no publicado');
 
-    res.setHeader('Content-Type', datos.mime || archivo.tipo);
+    res.setHeader('Content-Type', this.tipoDe(datos, archivo.tipo));
+    // Sin esto el reproductor no deja adelantar el video.
+    if (datos.formato === 'video') res.setHeader('Accept-Ranges', 'bytes');
     if (datos.formato === 'pdf') {
       res.setHeader('Content-Disposition', `inline; filename="${datos.nombre}"`);
     }
@@ -210,6 +245,22 @@ export class SettingsController {
 
     archivo.cuerpo.on('error', () => res.destroy());
     archivo.cuerpo.pipe(res);
+  }
+
+  /**
+   * El tipo que se anuncia al navegador.
+   *
+   * Para el video no basta con lo que dijo quien lo subió: algunos clientes
+   * mandan `application/octet-stream`, y con eso el reproductor no arranca.
+   */
+  private tipoDe(
+    datos: { mime: string; nombre: string; formato: string },
+    respaldo: string,
+  ) {
+    if (datos.formato === 'video' && !datos.mime.startsWith('video/')) {
+      return datos.nombre.toLowerCase().endsWith('.webm') ? 'video/webm' : 'video/mp4';
+    }
+    return datos.mime || respaldo;
   }
 
   // --------------------------------------------------------------------
