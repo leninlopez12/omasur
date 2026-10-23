@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
 import {
   AlertCircle,
+  Ban,
   Building2,
+  Calculator,
   CalendarCheck,
   CheckCircle2,
   ClipboardCheck,
@@ -9,8 +11,11 @@ import {
   Download,
   FileSpreadsheet,
   FileText,
+  FlaskConical,
   GraduationCap as IconoGrado,
   IdCard,
+  Inbox,
+  ListChecks,
   Megaphone,
   ImageIcon,
   LayoutDashboard,
@@ -18,12 +23,14 @@ import {
   Mail,
   Landmark,
   MessageCircle,
+  PencilLine,
   QrCode,
   ReceiptText,
   School,
   Search,
   Settings,
   UserCog,
+  Upload,
   UserCheck,
   Users,
   Wallet,
@@ -63,9 +70,36 @@ import Consolidado from '../components/Consolidado.jsx';
 import Acceder from '../components/Acceder.jsx';
 import EtapasCredencial from '../components/EtapasCredencial.jsx';
 import Comunicados from '../components/Comunicados.jsx';
+import { ExamenPrueba, ExamenPuntaje, ExamenRespuestas } from '../components/ExamenConfig.jsx';
+import {
+  ExamenAnular,
+  ExamenCorregir,
+  ExamenLlenar,
+} from '../components/ExamenDelegacion.jsx';
+import {
+  ExamenConsolidado,
+  ExamenConsultas,
+  ExamenEntregas,
+} from '../components/ExamenEntregas.jsx';
 import CredencialesComision from '../components/CredencialesComision.jsx';
 
 const SECCIONES = [
+  {
+    id: 'examen',
+    texto: 'Examen',
+    icono: FileSpreadsheet,
+    hijos: [
+      { id: 'examen-respuestas', texto: 'Respuestas correctas', icono: ListChecks },
+      { id: 'examen-puntaje', texto: 'Puntaje', icono: Calculator },
+      { id: 'examen-prueba', texto: 'Probar el envío', icono: FlaskConical },
+      { id: 'examen-entregas', texto: 'Entregas recibidas', icono: Inbox },
+      { id: 'examen-llenar', texto: 'Llenar por delegación', icono: Upload },
+      { id: 'examen-anular', texto: 'Anular envío', icono: Ban },
+      { id: 'examen-corregir', texto: 'Corregir respuestas', icono: PencilLine },
+      { id: 'examen-consultas', texto: 'Consultas de envíos', icono: Search },
+      { id: 'examen-consolidado', texto: 'Consolidado', icono: ClipboardList },
+    ],
+  },
   { id: 'tablero', texto: 'Tablero', icono: LayoutDashboard },
   { id: 'revisar-alumnos', texto: 'Inscripciones', icono: ReceiptText },
   { id: 'inscripciones', texto: 'Delegaciones', icono: ClipboardCheck },
@@ -112,6 +146,15 @@ const SECCIONES = [
 ];
 
 const TITULOS = {
+  'examen-respuestas': 'Examen · Respuestas correctas',
+  'examen-puntaje': 'Examen · Puntaje',
+  'examen-prueba': 'Examen · Probar el envío',
+  'examen-entregas': 'Examen · Entregas recibidas',
+  'examen-llenar': 'Examen · Llenar por delegación',
+  'examen-anular': 'Examen · Anular envío',
+  'examen-corregir': 'Examen · Corregir respuestas',
+  'examen-consultas': 'Examen · Consultas de envíos',
+  'examen-consolidado': 'Examen · Consolidado',
   tablero: 'Tablero general',
   'revisar-alumnos': 'Inscripciones por alumno',
   inscripciones: 'Delegaciones',
@@ -176,6 +219,16 @@ function Contenido() {
     >
       <AvisosEnVivo alAbrirTutor={abrirTutor} />
       <PermisoAvisos />
+
+      {seccion === 'examen-respuestas' && <ExamenRespuestas />}
+      {seccion === 'examen-puntaje' && <ExamenPuntaje />}
+      {seccion === 'examen-prueba' && <ExamenPrueba />}
+      {seccion === 'examen-entregas' && <ExamenEntregas />}
+      {seccion === 'examen-llenar' && <ExamenLlenar />}
+      {seccion === 'examen-anular' && <ExamenAnular />}
+      {seccion === 'examen-corregir' && <ExamenCorregir />}
+      {seccion === 'examen-consultas' && <ExamenConsultas />}
+      {seccion === 'examen-consolidado' && <ExamenConsolidado />}
 
       {seccion === 'tablero' && (
         <Tablero

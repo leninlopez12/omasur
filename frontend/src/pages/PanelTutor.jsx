@@ -6,6 +6,7 @@ import {
   BadgeCheck,
   CheckCircle2,
   CreditCard,
+  FileSpreadsheet,
   Download,
   IdCard,
   LayoutDashboard,
@@ -28,6 +29,7 @@ import { NotificacionesProvider } from '../lib/notificaciones.jsx';
 import GestorAlumnos from '../components/GestorAlumnos.jsx';
 import PasoPago, { Confirmado } from '../components/PasoPago.jsx';
 import MisInscripciones from '../components/MisInscripciones.jsx';
+import RespuestasExamen, { AvisoExamen } from '../components/RespuestasExamen.jsx';
 import {
   Aviso,
   Boton,
@@ -52,6 +54,7 @@ import {
 } from '../lib/datos';
 
 const SECCIONES = [
+  { id: 'examen', texto: 'Enviar respuestas del examen', icono: FileSpreadsheet },
   { id: 'resumen', texto: 'Resumen', icono: LayoutDashboard },
   { id: 'alumnos', texto: 'Estudiantes', icono: Users },
   { id: 'pago-quienes', texto: 'Seleccionar estudiantes', icono: UserCheck },
@@ -65,6 +68,7 @@ const SECCIONES = [
 const SECCIONES_PIE = [{ id: 'datos', texto: 'Mis datos', icono: Settings }];
 
 const TITULOS = {
+  examen: 'Respuestas del examen',
   resumen: 'Resumen de mi inscripción',
   alumnos: 'Mis estudiantes',
   'pago-quienes': 'Pago de la delegación',
@@ -86,6 +90,7 @@ export default function PanelTutor() {
 function Contenido() {
   const [seccion, setSeccion] = useState('resumen');
   const [resumen, setResumen] = useState(null);
+  const [examen, setExamen] = useState(null);
 
   const cargar = useCallback(async () => {
     const { data } = await api.get('/tutores/resumen');
@@ -94,12 +99,22 @@ function Contenido() {
 
   useEffect(() => {
     cargar();
+    api
+      .get('/examen/estado')
+      .then(({ data }) => setExamen(data))
+      .catch(() => setExamen(null));
   }, [cargar]);
+
+  // Resaltado solo mientras haya algo que hacer: una vez enviadas las
+  // respuestas —o llenadas por la comisión— deja de ser lo urgente.
+  const secciones = SECCIONES.map((s) =>
+    s.id === 'examen' ? { ...s, destacado: Boolean(examen?.abierto && !examen?.entrega) } : s,
+  );
 
   return (
     <PanelLayout
       titulo={TITULOS[seccion]}
-      secciones={SECCIONES}
+      secciones={secciones}
       seccionesPie={SECCIONES_PIE}
       actual={seccion}
       alCambiar={setSeccion}
@@ -107,6 +122,11 @@ function Contenido() {
     >
       <AvisosEnVivo />
       <FranjaSuplantacion />
+      <AvisoExamen
+        abierto={examen?.abierto}
+        yaEnvio={Boolean(examen?.entrega)}
+        alIr={() => setSeccion('examen')}
+      />
 
       {!resumen ? (
         <Cargando texto="Cargando su inscripción" />
@@ -131,6 +151,7 @@ function Contenido() {
           )}
           {seccion === 'credenciales' && <SeccionCredenciales resumen={resumen} />}
           {seccion === 'mi-credencial' && <MiCredencial resumen={resumen} />}
+          {seccion === 'examen' && <RespuestasExamen />}
           {seccion === 'historial' && <MisInscripciones />}
           {seccion === 'datos' && <SeccionDatos resumen={resumen} alCambiar={cargar} />}
         </>

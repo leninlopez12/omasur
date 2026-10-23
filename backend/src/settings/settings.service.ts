@@ -108,17 +108,31 @@ const ARCHIVOS = {
     url: '/api/ajustes/credencial',
     formato: 'imagen',
   },
+  // El tutorial que se le ofrece al tutor al abrirle el envío del examen.
+  tutorial: {
+    clave: 'tutorial_examen',
+    carpeta: 'publico/tutorial',
+    url: '/api/ajustes/tutorial',
+    formato: 'video',
+  },
 } as const;
 
 export type ArchivoAdministrado = keyof typeof ARCHIVOS;
 /** Los dos fondos, que el panel administra juntos. */
 export type TipoImagen = 'hero' | 'login';
 
-type Formato = 'imagen' | 'pdf';
+type Formato = 'imagen' | 'pdf' | 'video';
 
 const MAXIMOS: Record<Formato, number> = {
   imagen: 8 * 1024 * 1024,
   pdf: 20 * 1024 * 1024,
+  video: 100 * 1024 * 1024,
+};
+
+const POR_DEFECTO: Record<Formato, string> = {
+  imagen: 'imagen.jpg',
+  pdf: 'bases.pdf',
+  video: 'tutorial.mp4',
 };
 
 /** Sufijos con los que se guardan los datos de cada archivo. */
@@ -149,6 +163,7 @@ export class SettingsService {
       yape,
       bases,
       logoCredencial,
+      tutorial,
       comunicado,
     ] = await Promise.all([
       this.prisma.grupoWhatsapp.findMany({ orderBy: [{ orden: 'asc' }, { createdAt: 'asc' }] }),
@@ -166,6 +181,7 @@ export class SettingsService {
       this.datosArchivo('yape'),
       this.datosArchivo('bases'),
       this.datosArchivo('credencial'),
+      this.datosArchivo('tutorial'),
       this.comunicado(),
     ]);
 
@@ -191,7 +207,9 @@ export class SettingsService {
         numero: yapeNumero?.valor || YAPE_POR_DEFECTO.numero,
         titular: yapeTitular?.valor || YAPE_POR_DEFECTO.titular,
       },
-      archivos: { hero, login, yape, bases, credencial: logoCredencial },
+      archivos: { hero, login, yape, bases, credencial: logoCredencial, tutorial },
+      // El botón «Ver tutorial» del aviso del examen solo aparece si hay video.
+      tutorialExamen: tutorial?.url || null,
       // Solo si está publicado: un borrador no tiene por qué salir al público.
       comunicado: comunicado.publicado && comunicado.titulo ? comunicado : null,
       bases,
@@ -262,7 +280,7 @@ export class SettingsService {
 
     return {
       referencia: archivo.valor,
-      nombre: nombre?.valor || (conf.formato === 'pdf' ? 'bases.pdf' : 'imagen'),
+      nombre: nombre?.valor || POR_DEFECTO[conf.formato as Formato],
       mime: mime?.valor || '',
       formato: conf.formato as Formato,
     };
@@ -306,6 +324,17 @@ export class SettingsService {
       return;
     }
 
+    if (formato === 'video') {
+      // MP4 lleva 'ftyp' en el cuarto byte; WebM empieza por la firma de Matroska.
+      const esMp4 = cabeza.subarray(4, 8).toString('latin1') === 'ftyp';
+      const esWebm =
+        cabeza[0] === 0x1a && cabeza[1] === 0x45 && cabeza[2] === 0xdf && cabeza[3] === 0xa3;
+      if (!esMp4 && !esWebm) {
+        throw new BadRequestException('El archivo no es un video MP4 o WEBM');
+      }
+      return;
+    }
+
     const esJpg = cabeza[0] === 0xff && cabeza[1] === 0xd8 && cabeza[2] === 0xff;
     const esPng = cabeza.subarray(0, 8).toString('latin1') === '\x89PNG\r\n\x1a\n';
     const esWebp =
@@ -319,7 +348,7 @@ export class SettingsService {
 
   /** Sin rutas ni caracteres raros: este nombre viaja en una cabecera HTTP. */
   private nombreLimpio(original: string, formato: Formato) {
-    const porDefecto = formato === 'pdf' ? 'bases.pdf' : 'imagen.jpg';
+    const porDefecto = POR_DEFECTO[formato];
     const base = (original || porDefecto).split(/[\\/]/).pop() || porDefecto;
     const limpio = base
       .replace(/[^a-zA-Z0-9._ -]/g, '')
@@ -327,6 +356,7 @@ export class SettingsService {
       .slice(0, 80);
     if (!limpio) return porDefecto;
     if (formato === 'pdf' && !limpio.toLowerCase().endsWith('.pdf')) return porDefecto;
+    if (formato === 'video' && !/.(mp4|webm)$/i.test(limpio)) return porDefecto;
     return limpio;
   }
 

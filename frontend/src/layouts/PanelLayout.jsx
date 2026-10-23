@@ -66,7 +66,7 @@ export default function PanelLayout({
 
       <div className="flex-1 space-y-1.5 px-4 py-4">
         {secciones.map((seccion) => {
-          const { id, texto, icono: Icono, hijos } = seccion;
+          const { id, texto, icono: Icono, hijos, destacado } = seccion;
           const activoHijo = hijos?.some((h) => h.id === actual);
           const activo = actual === id || activoHijo;
 
@@ -77,7 +77,10 @@ export default function PanelLayout({
                 className={`flex w-full items-center text-left font-semibold transition ${t.item} ${
                   activo
                     ? 'bg-white text-granate-700 shadow-suave'
-                    : 'text-granate-100 hover:bg-granate-700'
+                    : destacado
+                      ? // Lo urgente no se pierde entre lo de siempre.
+                        'bg-amber-500 text-white hover:bg-amber-400'
+                      : 'text-granate-100 hover:bg-granate-700'
                 }`}
               >
                 <Icono className={`${t.icono} shrink-0`} />
