@@ -230,7 +230,10 @@ export class SettingsService {
 
     const maximo = MAXIMOS[conf.formato];
     if (archivo.size > maximo) {
-      throw new BadRequestException(`El archivo no debe pasar de ${maximo / 1024 / 1024} MB`);
+      const pesa = Math.ceil(archivo.size / 1024 / 1024);
+      throw new BadRequestException(
+        `El archivo pesa ${pesa} MB y el máximo es ${maximo / 1024 / 1024} MB`,
+      );
     }
     this.validarContenido(conf.formato, archivo);
 
@@ -325,12 +328,18 @@ export class SettingsService {
     }
 
     if (formato === 'video') {
-      // MP4 lleva 'ftyp' en el cuarto byte; WebM empieza por la firma de Matroska.
-      const esMp4 = cabeza.subarray(4, 8).toString('latin1') === 'ftyp';
+      // El 'ftyp' del MP4 suele ir en el byte 4, pero algunos grabadores meten
+      // antes una caja propia: se busca en el arranque y no en una posición
+      // fija, que es lo que hacía rebotar videos perfectamente válidos.
+      const inicio = archivo.buffer.subarray(0, 64);
+      const esMp4 = inicio.toString('latin1').includes('ftyp');
       const esWebm =
-        cabeza[0] === 0x1a && cabeza[1] === 0x45 && cabeza[2] === 0xdf && cabeza[3] === 0xa3;
+        inicio[0] === 0x1a && inicio[1] === 0x45 && inicio[2] === 0xdf && inicio[3] === 0xa3;
+
       if (!esMp4 && !esWebm) {
-        throw new BadRequestException('El archivo no es un video MP4 o WEBM');
+        throw new BadRequestException(
+          'El archivo no es un video MP4 o WEBM. Si lo grabó con un celular, conviértalo a MP4 antes de subirlo.',
+        );
       }
       return;
     }
@@ -356,7 +365,7 @@ export class SettingsService {
       .slice(0, 80);
     if (!limpio) return porDefecto;
     if (formato === 'pdf' && !limpio.toLowerCase().endsWith('.pdf')) return porDefecto;
-    if (formato === 'video' && !/.(mp4|webm)$/i.test(limpio)) return porDefecto;
+    if (formato === 'video' && !/\.(mp4|m4v|webm)$/i.test(limpio)) return porDefecto;
     return limpio;
   }
 

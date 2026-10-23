@@ -11,6 +11,9 @@ import { GRADOS } from '../lib/datos';
 export const ALTERNATIVAS = ['A', 'B', 'C', 'D', 'E', 'BLANCO'];
 export const PREGUNTAS = 20;
 
+/** Lo mismo que acepta la API: conviene avisarlo antes de subir 100 MB en vano. */
+const TOPE_VIDEO = 100 * 1024 * 1024;
+
 /**
  * La configuración del examen, compartida por las pantallas que la tocan.
  *
@@ -530,19 +533,46 @@ export function ExamenTutorial() {
   const [error, setError] = useState('');
   const [mensaje, setMensaje] = useState('');
   const [procesando, setProcesando] = useState('');
+  const [avance, setAvance] = useState(0);
   const archivoRef = useRef(null);
 
   const video = ajustes.archivos?.tutorial || null;
 
+  /** Lo que se puede revisar sin gastar una subida entera. */
+  const revisar = (elegido) => {
+    if (!/\.(mp4|m4v|webm)$/i.test(elegido.name)) {
+      const tiene = elegido.name.includes('.') ? elegido.name.split('.').pop() : 'sin extensión';
+      return `El archivo es «${tiene}» y solo se aceptan MP4 o WEBM. Conviértalo y vuelva a intentarlo.`;
+    }
+    if (elegido.size > TOPE_VIDEO) {
+      const pesa = Math.ceil(elegido.size / 1024 / 1024);
+      return `El video pesa ${pesa} MB y el máximo es ${TOPE_VIDEO / 1024 / 1024} MB. Comprímalo o recórtelo.`;
+    }
+    if (elegido.size === 0) return 'El archivo llegó vacío. Vuelva a elegirlo.';
+    return '';
+  };
+
   const subir = async () => {
     if (!archivo) return setError('Elija el video');
+
+    const problema = revisar(archivo);
+    if (problema) return setError(problema);
+
     setError('');
     setMensaje('');
+    setAvance(0);
     setProcesando('subir');
     try {
       const formulario = new FormData();
       formulario.append('archivo', archivo);
-      await api.post('/ajustes/tutorial', formulario);
+      await api.post('/ajustes/tutorial', formulario, {
+        // Un video tarda: sin esto la pantalla parece colgada y se recarga a
+        // medio camino, que es la forma más fácil de que no suba nunca.
+        timeout: 15 * 60 * 1000,
+        onUploadProgress: (evento) => {
+          if (evento.total) setAvance(Math.round((evento.loaded / evento.total) * 100));
+        },
+      });
       setArchivo(null);
       if (archivoRef.current) archivoRef.current.value = '';
       setMensaje('Tutorial publicado: los tutores ya ven el botón «Ver tutorial»');
@@ -551,6 +581,7 @@ export function ExamenTutorial() {
       setError(mensajeError(e, 'No se pudo subir el video'));
     } finally {
       setProcesando('');
+      setAvance(0);
     }
   };
 
@@ -608,9 +639,27 @@ export function ExamenTutorial() {
         >
           <Upload className="h-7 w-7 text-granate-600" />
           <span className="text-base font-semibold text-granate-700">
-            {archivo ? archivo.name : 'Toque para elegir el video'}
+            {archivo
+              ? `${archivo.name} · ${Math.max(1, Math.round(archivo.size / 1024 / 1024))} MB`
+              : 'Toque para elegir el video'}
           </span>
         </button>
+
+        {procesando === 'subir' && (
+          <div>
+            <div className="h-3 w-full overflow-hidden rounded-full bg-slate-200">
+              <div
+                className="h-full rounded-full bg-granate-600 transition-all"
+                style={{ width: `${avance}%` }}
+              />
+            </div>
+            <p className="mt-2 text-base text-slate-600">
+              {avance < 100
+                ? `Subiendo… ${avance}%. No cierre esta página.`
+                : 'Guardando en Cloudflare…'}
+            </p>
+          </div>
+        )}
         <input
           ref={archivoRef}
           type="file"
@@ -619,9 +668,9 @@ export function ExamenTutorial() {
           onChange={(e) => {
             const elegido = e.target.files?.[0];
             if (!elegido) return;
-            setError('');
             setMensaje('');
             setArchivo(elegido);
+            setError(revisar(elegido));
           }}
         />
 

@@ -124,6 +124,13 @@ async function bootstrap() {
 
   const port = process.env.PORT || 3001;
   await app.listen(port);
+
+  // Node corta una petición a los 5 minutos. Subir el video del tutorial por
+  // una conexión lenta tarda más que eso, y el corte se veía como una falla
+  // sin causa. Quince minutos alcanzan de sobra para los 100 MB que se aceptan.
+  const servidor = app.getHttpServer();
+  servidor.requestTimeout = 15 * 60 * 1000;
+  servidor.headersTimeout = 16 * 60 * 1000;
   console.log(`OMASUR API escuchando en el puerto ${port}, bajo /api`);
 }
 bootstrap();

@@ -75,7 +75,7 @@ export class StorageService implements OnModuleInit {
       // Con credenciales o bucket mal configurados el tutor no debe ver un error crudo.
       this.log.error(`Fallo la subida a R2: ${error?.message ?? error}`);
       throw new ServiceUnavailableException(
-        'No pudimos guardar su comprobante en este momento. Intente de nuevo en unos minutos.',
+        'No pudimos guardar el archivo en este momento. Intente de nuevo en unos minutos.',
       );
     }
 

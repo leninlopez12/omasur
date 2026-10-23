@@ -20,9 +20,29 @@ api.interceptors.response.use(
 
 /** Convierte cualquier error del backend en un texto legible. */
 export function mensajeError(error, porDefecto = 'Ocurrió un error, intente nuevamente') {
+  const estado = error?.response?.status;
   const data = error?.response?.data;
+
+  // Lo que responde el proxy —no la API— no trae el campo message, así que sin
+  // esto un archivo rechazado por tamaño se veía como una falla cualquiera.
+  // Si el 413 viene de la API, su mensaje dice el peso exacto y vale más.
+  if (estado === 413 && !data?.message) {
+    return 'El archivo es demasiado grande para el servidor. Avise a quien administra el servidor: hay que subir el límite de subida (client_max_body_size en Nginx).';
+  }
+  if (estado === 403 && !data?.message) {
+    return 'Su cuenta no tiene permiso para esto. Entre con la cuenta de administrador.';
+  }
+  if (estado === 502 || estado === 504) {
+    return 'El servidor tardó demasiado en responder. Si el archivo es grande, pruebe con una conexión mejor o con uno más liviano.';
+  }
+  if (!error?.response) {
+    return 'No se pudo conectar con el servidor. Revise su conexión y vuelva a intentarlo.';
+  }
+
   if (!data) return porDefecto;
   if (Array.isArray(data.message)) return data.message.join('. ');
+  // Algunos proxys devuelven una página HTML: eso no es un mensaje para nadie.
+  if (typeof data === 'string') return porDefecto;
   return data.message || porDefecto;
 }
 

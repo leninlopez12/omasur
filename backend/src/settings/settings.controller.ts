@@ -30,12 +30,12 @@ import { Roles } from '../common/decorators';
 function recibir(formato: 'imagen' | 'pdf' | 'video') {
   const EXTENSIONES = {
     pdf: /\.pdf$/i,
-    video: /\.(mp4|webm)$/i,
+    video: /\.(mp4|m4v|webm)$/i,
     imagen: /\.(jpg|jpeg|png|webp)$/i,
   };
   const AVISOS = {
     pdf: 'Las bases deben ser un archivo PDF',
-    video: 'El tutorial debe ser un video MP4 o WEBM',
+    video: 'El tutorial debe ser un video MP4 o WEBM. Convierta el archivo y vuelva a intentarlo.',
     imagen: 'Solo se aceptan imágenes JPG, PNG o WEBP',
   };
   const TOPES = { pdf: 20, video: 100, imagen: 8 };
