@@ -1,5 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertCircle, CheckCircle2, Download, Save, Trash2, Upload } from 'lucide-react';
+import {
+  AlertCircle,
+  ArrowLeft,
+  CheckCircle2,
+  Download,
+  Save,
+  Trash2,
+  Upload,
+} from 'lucide-react';
 import { Aviso, Boton, Cargando, Etiqueta, Selector, Tarjeta } from './Ui.jsx';
 import { COLOR_ALTERNATIVA } from './RespuestasExamen.jsx';
 import { GRADOS } from '../lib/datos';
@@ -197,6 +205,10 @@ function CategoriaCorregida({ categoria, clave, alumnos }) {
  * El atajo para las delegaciones que no pueden subir el archivo ellas mismas.
  * Queda marcado como llenado por la comisión, y por eso el tutor deja de ver
  * el aviso de envío en su panel.
+ *
+ * Son dos pantallas y no una: elegida la delegación, la lista se va y queda
+ * solo ella. Antes el panel de carga aparecía debajo de la tabla, fuera de
+ * vista, y el botón parecía no hacer nada.
  */
 export function ExamenLlenar() {
   const { delegaciones, error: errorLista, recargar } = useDelegaciones();
@@ -221,26 +233,29 @@ export function ExamenLlenar() {
   if (!delegaciones) return <Cargando texto="Cargando delegaciones" />;
   if (delegaciones.length === 0) return <SinDelegaciones titulo="Llenar por la delegación" />;
 
+  const volver = async () => {
+    setGuardado(null);
+    setTutorId('');
+    setArchivo(null);
+    setRevision(null);
+    setError('');
+    await recargar();
+  };
+
   if (guardado) {
     return (
       <Confirmado
         titulo="Respuestas registradas"
-        detalle={`Se guardaron las alternativas de ${guardado.total} estudiantes de ${guardado.institucion}.`}
-        textoBoton="Entendido"
-        alSeguir={() => setGuardado(null)}
+        detalle={`Se guardaron las alternativas de ${guardado.total} ${
+          guardado.total === 1 ? 'estudiante' : 'estudiantes'
+        } de ${guardado.institucion}.`}
+        textoBoton="Regresar"
+        alSeguir={volver}
       />
     );
   }
 
   const delegacion = delegaciones.find((d) => d.tutorId === tutorId);
-
-  const filtradas = delegaciones.filter((d) => {
-    const texto = sinTildes(buscar);
-    if (texto && !sinTildes(`${d.institucion} ${d.tutor}`).includes(texto)) return false;
-    if (estado === 'pendientes' && d.enviado) return false;
-    if (estado === 'enviadas' && !d.enviado) return false;
-    return true;
-  });
 
   const bajar = async (d) => {
     setProcesando('bajar-' + d.tutorId);
@@ -251,58 +266,166 @@ export function ExamenLlenar() {
     }
   };
 
-  const elegir = (d) => {
-    setTutorId(d.tutorId);
-    setArchivo(null);
-    setRevision(null);
-    setError('');
-  };
+  // ------------------------------------------------------------ una delegación
 
-  const subir = async (evento) => {
-    const elegido = evento.target.files?.[0];
-    if (!elegido) return;
-    setArchivo(elegido);
-    setRevision(null);
-    setError('');
-    setProcesando('revisar');
-    try {
-      const formulario = new FormData();
-      formulario.append('archivo', elegido);
-      const { data } = await api.post(`/examen/revisar/${tutorId}`, formulario);
-      setRevision(data);
-    } catch (e) {
-      setError(mensajeError(e, 'No se pudo leer el archivo'));
-      setArchivo(null);
-    } finally {
-      setProcesando('');
-      if (archivoRef.current) archivoRef.current.value = '';
-    }
-  };
-
-  const guardar = async () => {
-    const seguro = window.confirm(
-      `Va a registrar las respuestas de ${revision.filas.length} estudiantes de ${delegacion.institucion}.\n\n` +
-        'Quedará como llenado por la comisión. ¿Guardar?',
-    );
-    if (!seguro) return;
-
-    setError('');
-    setProcesando('guardar');
-    try {
-      const formulario = new FormData();
-      formulario.append('archivo', archivo);
-      const { data } = await api.post(`/examen/enviar/${tutorId}`, formulario);
-      setGuardado({ total: data.total, institucion: delegacion.institucion });
-      setArchivo(null);
+  if (delegacion) {
+    const subir = async (evento) => {
+      const elegido = evento.target.files?.[0];
+      if (!elegido) return;
+      setArchivo(elegido);
       setRevision(null);
-      setTutorId('');
-      await recargar();
-    } catch (e) {
-      setError(mensajeError(e, 'No se pudieron guardar las respuestas'));
-    } finally {
-      setProcesando('');
-    }
-  };
+      setError('');
+      setProcesando('revisar');
+      try {
+        const formulario = new FormData();
+        formulario.append('archivo', elegido);
+        const { data } = await api.post(`/examen/revisar/${delegacion.tutorId}`, formulario);
+        setRevision(data);
+      } catch (e) {
+        setError(mensajeError(e, 'No se pudo leer el archivo'));
+        setArchivo(null);
+      } finally {
+        setProcesando('');
+        if (archivoRef.current) archivoRef.current.value = '';
+      }
+    };
+
+    const confirmar = async () => {
+      setError('');
+      setProcesando('guardar');
+      try {
+        const formulario = new FormData();
+        formulario.append('archivo', archivo);
+        const { data } = await api.post(`/examen/enviar/${delegacion.tutorId}`, formulario);
+        setGuardado({ total: data.total, institucion: delegacion.institucion });
+      } catch (e) {
+        setError(mensajeError(e, 'No se pudieron guardar las respuestas'));
+      } finally {
+        setProcesando('');
+      }
+    };
+
+    return (
+      <div className="space-y-6">
+        <Tarjeta>
+          <div className="flex flex-wrap items-start justify-between gap-5">
+            <div>
+              <h3 className="text-3xl font-black text-slate-900">{delegacion.institucion}</h3>
+              <dl className="mt-3 space-y-1 text-xl text-slate-600">
+                <div className="flex flex-wrap gap-2">
+                  <dt className="font-semibold text-slate-800">Tutor:</dt>
+                  <dd>{delegacion.tutor}</dd>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <dt className="font-semibold text-slate-800">Celular:</dt>
+                  <dd>{delegacion.celular || '—'}</dd>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <dt className="font-semibold text-slate-800">Estudiantes:</dt>
+                  <dd>{delegacion.alumnosAprobados}</dd>
+                </div>
+              </dl>
+            </div>
+            <Boton variante="contorno" onClick={volver}>
+              <ArrowLeft className="h-6 w-6" />
+              Volver a la lista
+            </Boton>
+          </div>
+
+          {delegacion.enviado && (
+            <div className="mt-6">
+              <Aviso tipo="alerta" icono={AlertCircle} compacto>
+                Esta delegación ya envió el{' '}
+                {new Date(delegacion.enviadoEn).toLocaleString('es-PE', {
+                  dateStyle: 'short',
+                  timeStyle: 'short',
+                })}
+                . Si confirma de nuevo, se reemplaza lo anterior.
+              </Aviso>
+            </div>
+          )}
+
+          <div className="mt-8 flex flex-wrap gap-3">
+            <Boton
+              variante="excel"
+              cargando={procesando === 'bajar-' + delegacion.tutorId}
+              onClick={() => bajar(delegacion)}
+            >
+              <Download className="h-6 w-6" />
+              Bajar el Excel de su delegación
+            </Boton>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => archivoRef.current?.click()}
+            className="mt-6 flex w-full flex-col items-center justify-center gap-4 rounded-3xl border-2 border-dashed border-emerald-300 bg-[linear-gradient(145deg,#F0FDF4_0%,#D7F7E4_45%,#A7F3D0_100%)] px-6 py-10 shadow-[0_18px_36px_-20px_rgba(15,23,42,0.45)] transition hover:border-emerald-500"
+          >
+            <span className="flex h-20 w-20 items-center justify-center rounded-3xl bg-white/70 shadow-[0_12px_24px_-10px_rgba(15,23,42,0.45)]">
+              <Upload className="h-9 w-9 text-emerald-700" />
+            </span>
+            <span className="text-2xl font-black text-slate-900">
+              {archivo ? archivo.name : 'Toque para elegir el Excel llenado'}
+            </span>
+            <span className="text-lg text-slate-700">Solo el archivo que descargó arriba.</span>
+          </button>
+          <input
+            ref={archivoRef}
+            type="file"
+            accept=".xlsx,.xls"
+            className="hidden"
+            onChange={subir}
+          />
+
+          {procesando === 'revisar' && (
+            <div className="mt-6">
+              <Cargando texto="Revisando el archivo" />
+            </div>
+          )}
+
+          {error && (
+            <div className="mt-6">
+              <Aviso tipo="error" icono={AlertCircle}>
+                {error}
+              </Aviso>
+            </div>
+          )}
+        </Tarjeta>
+
+        {revision && (
+          <Tarjeta>
+            <h4 className="text-2xl font-black text-slate-900">Revise antes de confirmar</h4>
+            <Corregido resultado={revision} />
+
+            <div className="mt-8 flex flex-wrap justify-end gap-3">
+              <Boton variante="contorno" onClick={volver}>
+                Cancelar
+              </Boton>
+              <Boton
+                tamano="grande"
+                cargando={procesando === 'guardar'}
+                disabled={revision.errores.length > 0 || revision.filas.length === 0}
+                onClick={confirmar}
+              >
+                <Save className="h-7 w-7" />
+                Confirmar llenado de respuestas
+              </Boton>
+            </div>
+          </Tarjeta>
+        )}
+      </div>
+    );
+  }
+
+  // ------------------------------------------------------------------- la lista
+
+  const texto = sinTildes(buscar);
+  const filtradas = delegaciones.filter((d) => {
+    if (texto && !sinTildes(`${d.institucion} ${d.tutor}`).includes(texto)) return false;
+    if (estado === 'pendientes' && d.enviado) return false;
+    if (estado === 'enviadas' && !d.enviado) return false;
+    return true;
+  });
 
   return (
     <div className="space-y-6">
@@ -346,7 +469,7 @@ export function ExamenLlenar() {
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {filtradas.map((d) => (
-                  <tr key={d.tutorId} className={d.tutorId === tutorId ? 'bg-granate-50' : ''}>
+                  <tr key={d.tutorId}>
                     <td className="px-4 py-3">
                       <span className="block text-base font-semibold text-slate-900">
                         {d.institucion}
@@ -376,22 +499,11 @@ export function ExamenLlenar() {
                         </Etiqueta>
                       )}
                     </td>
-                    <td className="px-4 py-3">
-                      <div className="flex flex-wrap justify-end gap-2">
-                        <Boton
-                          variante="excelContorno"
-                          tamano="chico"
-                          cargando={procesando === 'bajar-' + d.tutorId}
-                          onClick={() => bajar(d)}
-                        >
-                          <Download className="h-5 w-5" />
-                          Excel
-                        </Boton>
-                        <Boton tamano="chico" onClick={() => elegir(d)}>
-                          <Upload className="h-5 w-5" />
-                          Llenar
-                        </Boton>
-                      </div>
+                    <td className="px-4 py-3 text-right">
+                      <Boton tamano="chico" onClick={() => setTutorId(d.tutorId)}>
+                        <Upload className="h-5 w-5" />
+                        Asumir llenado de respuestas
+                      </Boton>
                     </td>
                   </tr>
                 ))}
@@ -400,79 +512,6 @@ export function ExamenLlenar() {
           </div>
         )}
       </Tarjeta>
-
-      {delegacion && (
-        <Tarjeta>
-          <h4 className="text-xl font-black text-slate-900">{delegacion.institucion}</h4>
-          <p className="mt-1 text-base text-slate-600">
-            {delegacion.tutor} · {delegacion.alumnosAprobados} alumnos
-          </p>
-
-          <div className="mt-6 flex flex-wrap gap-3">
-            <Boton
-              variante="excel"
-              cargando={procesando === 'bajar-' + delegacion.tutorId}
-              onClick={() => bajar(delegacion)}
-            >
-              <Download className="h-5 w-5" />
-              Bajar su Excel
-            </Boton>
-            <Boton
-              variante="contorno"
-              cargando={procesando === 'revisar'}
-              onClick={() => archivoRef.current?.click()}
-            >
-              <Upload className="h-5 w-5" />
-              {archivo ? archivo.name : 'Subir el Excel llenado'}
-            </Boton>
-            <input
-              ref={archivoRef}
-              type="file"
-              accept=".xlsx,.xls"
-              className="hidden"
-              onChange={subir}
-            />
-          </div>
-
-          {delegacion.enviado && (
-            <div className="mt-6">
-              <Aviso tipo="alerta" icono={AlertCircle} compacto>
-                Esta delegación ya envió el{' '}
-                {new Date(delegacion.enviadoEn).toLocaleString('es-PE', {
-                  dateStyle: 'short',
-                  timeStyle: 'short',
-                })}
-                . Si guarda otra vez, se reemplaza lo anterior.
-              </Aviso>
-            </div>
-          )}
-
-          {error && (
-            <div className="mt-6">
-              <Aviso tipo="error" icono={AlertCircle}>
-                {error}
-              </Aviso>
-            </div>
-          )}
-
-          {revision && (
-            <>
-              <Corregido resultado={revision} />
-              <div className="mt-8 flex justify-end">
-                <Boton
-                  tamano="grande"
-                  cargando={procesando === 'guardar'}
-                  disabled={revision.errores.length > 0 || revision.filas.length === 0}
-                  onClick={guardar}
-                >
-                  <Save className="h-7 w-7" />
-                  Guardar por la delegación
-                </Boton>
-              </div>
-            </>
-          )}
-        </Tarjeta>
-      )}
     </div>
   );
 }

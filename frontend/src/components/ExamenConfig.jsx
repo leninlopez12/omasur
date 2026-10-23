@@ -394,7 +394,7 @@ export function ExamenPrueba() {
             }}
           >
             <Download className="h-5 w-5" />
-            Bajar su Excel
+            Bajar el Excel de la delegación
           </Boton>
           <Boton
             variante="contorno"
