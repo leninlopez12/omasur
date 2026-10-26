@@ -8,6 +8,7 @@ import { PaymentsModule } from './payments/payments.module';
 import { CredentialsModule } from './credentials/credentials.module';
 import { AdminModule } from './admin/admin.module';
 import { ExamenModule } from './examen/examen.module';
+import { ResultadosModule } from './resultados/resultados.module';
 import { SettingsModule } from './settings/settings.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { StorageModule } from './storage/storage.module';
@@ -24,6 +25,7 @@ import { MailModule } from './mail/mail.module';
     CredentialsModule,
     AdminModule,
     ExamenModule,
+    ResultadosModule,
     SettingsModule,
     NotificationsModule,
     StorageModule,

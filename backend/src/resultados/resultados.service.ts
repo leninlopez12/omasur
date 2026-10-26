@@ -1,0 +1,742 @@
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { randomUUID } from 'crypto';
+import * as ExcelJS from 'exceljs';
+import { PrismaService } from '../prisma/prisma.service';
+import { ExamenService } from '../examen/examen.service';
+import { GRADOS } from '../common/grados';
+import { GRANATE, escribirEncabezados, escribirTitulo, nombreArchivo } from '../common/excel';
+
+const CLAVE = 'resultados_config';
+
+/**
+ * Las dos tandas, que se trabajan por separado.
+ *
+ * Primero las delegaciones cuyo tutor mandó sus propias respuestas; después
+ * las que llenó la comisión, que son las que conviene mirar con más calma.
+ * Cada una se revisa, se desempata y se publica por su cuenta.
+ */
+export type Ola = 'tutores' | 'comision';
+
+export type EstadoResultado = 'CLASIFICA' | 'NO_CLASIFICA' | 'EN_EVALUACION' | 'EMPATE';
+
+export interface Agrupacion {
+  id: string;
+  nombre: string;
+  delegacionId: string | null;
+  miembros: string[];
+}
+
+export interface ConfigResultados {
+  porcentaje: number;
+  manual: Record<string, 'CLASIFICA' | 'NO_CLASIFICA'>;
+  agrupaciones: Agrupacion[];
+  publicado: Record<Ola, boolean>;
+  publicadoEn: Record<Ola, string | null>;
+  /** Lo único que se lee en la portada sobre los resultados. */
+  tituloPublico: string;
+  /** Cómo se ordena la lista pública. */
+  agrupadoPor: 'categoria' | 'delegacion';
+  /** La consulta por DNI se enciende aparte de la lista. */
+  consultaActiva: boolean;
+  /** Qué supervisores pueden entrar a esta sección. El admin siempre puede. */
+  encargados: string[];
+  actualizado: string;
+}
+
+const TITULO_POR_DEFECTO = 'RESULTADOS PRIMERA ETAPA INSTITUCIONAL';
+
+const VACIA: ConfigResultados = {
+  porcentaje: 30,
+  manual: {},
+  agrupaciones: [],
+  publicado: { tutores: false, comision: false },
+  publicadoEn: { tutores: null, comision: null },
+  tituloPublico: TITULO_POR_DEFECTO,
+  agrupadoPor: 'categoria',
+  consultaActiva: false,
+  encargados: [],
+  actualizado: '',
+};
+
+interface Alumno {
+  clave: string;
+  tutorId: string;
+  institucion: string;
+  tutor: string;
+  celular: string;
+  dni: string;
+  nombres: string;
+  categoria: string;
+  puntaje: number;
+  ola: Ola;
+}
+
+export interface Resultado extends Alumno {
+  grupoId: string;
+  grupoNombre: string;
+  agrupado: boolean;
+  puesto: number;
+  estado: EstadoResultado;
+  manual: boolean;
+}
+
+/**
+ * Resultados de la etapa institucional.
+ *
+ * Cada delegación compite consigo misma: dentro de una categoría clasifican
+ * los mejores de esa misma institución, no los mejores del concurso. De ahí
+ * que el corte se calcule pozo por pozo y no sobre una tabla general.
+ *
+ * No hay tabla nueva: lo único que se guarda son las decisiones de la
+ * comisión. Los puntajes se vuelven a leer del examen en cada cálculo, para
+ * que corregir una respuesta siga arrastrando hasta aquí.
+ */
+@Injectable()
+export class ResultadosService {
+  private readonly log = new Logger('Resultados');
+
+  constructor(
+    private prisma: PrismaService,
+    private examen: ExamenService,
+  ) {}
+
+  // ---------------------------------------------------------------- configuración
+
+  async config(): Promise<ConfigResultados> {
+    const fila = await this.prisma.ajuste.findUnique({ where: { clave: CLAVE } });
+    if (!fila?.valor) return this.vacia();
+
+    try {
+      const guardada = JSON.parse(fila.valor);
+      return {
+        ...this.vacia(),
+        ...guardada,
+        manual: guardada.manual || {},
+        agrupaciones: guardada.agrupaciones || [],
+        encargados: guardada.encargados || [],
+        publicado: { ...VACIA.publicado, ...guardada.publicado },
+        publicadoEn: { ...VACIA.publicadoEn, ...guardada.publicadoEn },
+      };
+    } catch {
+      return this.vacia();
+    }
+  }
+
+  private vacia(): ConfigResultados {
+    return {
+      ...VACIA,
+      manual: {},
+      agrupaciones: [],
+      encargados: [],
+      publicado: { ...VACIA.publicado },
+      publicadoEn: { ...VACIA.publicadoEn },
+    };
+  }
+
+  private async guardar(config: ConfigResultados) {
+    config.actualizado = new Date().toISOString();
+    await this.prisma.ajuste.upsert({
+      where: { clave: CLAVE },
+      create: { clave: CLAVE, valor: JSON.stringify(config) },
+      update: { valor: JSON.stringify(config) },
+    });
+    return config;
+  }
+
+  /** Título, forma de la lista y si la consulta por DNI está encendida. */
+  async guardarAjustes(datos: Partial<ConfigResultados>) {
+    const config = await this.config();
+
+    if (datos.tituloPublico !== undefined) {
+      config.tituloPublico = String(datos.tituloPublico).trim().slice(0, 120) || TITULO_POR_DEFECTO;
+    }
+    if (datos.agrupadoPor === 'categoria' || datos.agrupadoPor === 'delegacion') {
+      config.agrupadoPor = datos.agrupadoPor;
+    }
+    if (datos.consultaActiva !== undefined) {
+      config.consultaActiva = Boolean(datos.consultaActiva);
+    }
+
+    await this.guardar(config);
+    return config;
+  }
+
+  /** Los supervisores del equipo, marcando a los que están a cargo. */
+  async encargados() {
+    const [config, supervisores] = await Promise.all([
+      this.config(),
+      this.prisma.admin.findMany({
+        where: { rol: 'SUPERVISOR' },
+        orderBy: { createdAt: 'asc' },
+        select: { id: true, nombre: true, correo: true },
+      }),
+    ]);
+
+    return supervisores.map((s) => ({ ...s, aCargo: config.encargados.includes(s.id) }));
+  }
+
+  async cambiarEncargado(id: string, aCargo: boolean) {
+    const supervisor = await this.prisma.admin.findUnique({ where: { id } });
+    if (!supervisor || supervisor.rol !== 'SUPERVISOR') {
+      throw new NotFoundException('Ese supervisor no existe');
+    }
+
+    const config = await this.config();
+    config.encargados = aCargo
+      ? [...new Set([...config.encargados, id])]
+      : config.encargados.filter((x) => x !== id);
+
+    await this.guardar(config);
+    this.log.warn(
+      `${supervisor.nombre} ${aCargo ? 'queda a cargo de' : 'sale de'} los resultados.`,
+    );
+    return this.encargados();
+  }
+
+  /** Lo que pregunta el panel para saber si muestra la sección. */
+  async puedeEntrar(usuario: { sub: string; rol: string }) {
+    if (usuario.rol === 'ADMIN') return { puede: true };
+    if (usuario.rol !== 'SUPERVISOR') return { puede: false };
+
+    const { encargados } = await this.config();
+    return { puede: encargados.includes(usuario.sub) };
+  }
+
+  // ----------------------------------------------------------------- el cálculo
+
+  /**
+   * Cuántos pasan de un pozo de `n` estudiantes.
+   *
+   * Es el porcentaje redondeado hacia arriba: con 4 pasan 2, con 7 pasan 3,
+   * con 11 pasan 4. Nunca hacia abajo, porque dejaría sin cupo a categorías
+   * chicas que sí tienen derecho a uno.
+   */
+  cupos(n: number, porcentaje = 30) {
+    if (n <= 1) return 0;
+    return Math.max(1, Math.ceil((n * porcentaje) / 100));
+  }
+
+  private async alumnos(): Promise<Alumno[]> {
+    const entregas = await this.examen.entregas();
+    const tutores = await this.prisma.tutor.findMany({
+      where: { id: { in: entregas.map((e) => e.tutorId) } },
+      select: { id: true, nombres: true, apellidos: true, celular: true },
+    });
+    const porId = new Map(tutores.map((t) => [t.id, t]));
+
+    const lista: Alumno[] = [];
+    for (const entrega of entregas) {
+      const completa = await this.examen.entregaDe(entrega.tutorId);
+      const tutor = porId.get(entrega.tutorId);
+
+      for (const fila of completa?.filas || []) {
+        lista.push({
+          clave: `${entrega.tutorId}:${fila.dni}`,
+          tutorId: entrega.tutorId,
+          institucion: entrega.institucion,
+          tutor: tutor ? `${tutor.nombres} ${tutor.apellidos}`.trim() : '',
+          celular: tutor?.celular || '',
+          dni: fila.dni,
+          nombres: fila.nombres,
+          categoria: fila.categoria,
+          puntaje: fila.puntaje,
+          ola: entrega.porComision ? 'comision' : 'tutores',
+        });
+      }
+    }
+
+    return lista;
+  }
+
+  /**
+   * La tabla de una tanda.
+   *
+   * El filtro va antes de armar los pozos, no después: así trabajar la tanda
+   * de los tutores no depende de lo que todavía no cargó la comisión, y lo
+   * que se revise y publique ahí ya no se mueve.
+   */
+  async calcular(ola?: Ola) {
+    const [config, todos] = await Promise.all([this.config(), this.alumnos()]);
+    const alumnos = ola ? todos.filter((a) => a.ola === ola) : todos;
+
+    const pozoDe = new Map<string, { id: string; nombre: string; agrupado: boolean }>();
+    for (const a of alumnos) {
+      pozoDe.set(a.clave, { id: a.tutorId, nombre: a.institucion, agrupado: false });
+    }
+
+    for (const grupo of config.agrupaciones) {
+      for (const miembro of grupo.miembros) {
+        if (!alumnos.some((a) => a.clave === miembro)) continue;
+
+        if (grupo.delegacionId) {
+          const anfitriona = alumnos.find((a) => a.tutorId === grupo.delegacionId);
+          pozoDe.set(miembro, {
+            id: grupo.delegacionId,
+            nombre: anfitriona?.institucion || grupo.nombre,
+            agrupado: true,
+          });
+        } else {
+          pozoDe.set(miembro, { id: `grupo:${grupo.id}`, nombre: grupo.nombre, agrupado: true });
+        }
+      }
+    }
+
+    const pozos = new Map<string, Alumno[]>();
+    for (const a of alumnos) {
+      const pozo = pozoDe.get(a.clave)!;
+      const llave = `${pozo.id}|${a.categoria}`;
+      if (!pozos.has(llave)) pozos.set(llave, []);
+      pozos.get(llave)!.push(a);
+    }
+
+    const resultados: Resultado[] = [];
+
+    for (const [, lista] of pozos) {
+      lista.sort((a, b) => b.puntaje - a.puntaje || a.nombres.localeCompare(b.nombres, 'es'));
+
+      const cupos = this.cupos(lista.length, config.porcentaje);
+      const corte = cupos > 0 ? lista[cupos - 1].puntaje : null;
+      const mejores = corte === null ? 0 : lista.filter((a) => a.puntaje > corte).length;
+      const empatados = corte === null ? 0 : lista.filter((a) => a.puntaje === corte).length;
+      // Si los empatados en el corte caben, pasan todos; si no, lo decide alguien.
+      const empateReal = corte !== null && empatados > cupos - mejores;
+
+      lista.forEach((alumno, i) => {
+        const pozo = pozoDe.get(alumno.clave)!;
+        const decision = config.manual[alumno.clave];
+
+        let estado: EstadoResultado;
+        if (lista.length === 1) estado = 'EN_EVALUACION';
+        else if (corte === null) estado = 'NO_CLASIFICA';
+        else if (alumno.puntaje > corte) estado = 'CLASIFICA';
+        else if (alumno.puntaje === corte) estado = empateReal ? 'EMPATE' : 'CLASIFICA';
+        else estado = 'NO_CLASIFICA';
+
+        resultados.push({
+          ...alumno,
+          grupoId: pozo.id,
+          grupoNombre: pozo.nombre,
+          agrupado: pozo.agrupado,
+          puesto: i + 1,
+          estado: decision || estado,
+          manual: Boolean(decision),
+        });
+      });
+    }
+
+    resultados.sort(
+      (a, b) =>
+        a.grupoNombre.localeCompare(b.grupoNombre, 'es') ||
+        a.categoria.localeCompare(b.categoria) ||
+        a.puesto - b.puesto,
+    );
+
+    return { config, resultados };
+  }
+
+  /** Las dos tandas juntas, cada una calculada en su propio pozo. */
+  async calcularTodo() {
+    const [tutores, comision] = await Promise.all([
+      this.calcular('tutores'),
+      this.calcular('comision'),
+    ]);
+
+    return {
+      config: tutores.config,
+      resultados: [...tutores.resultados, ...comision.resultados],
+    };
+  }
+
+  private resumir(resultados: Resultado[], config: ConfigResultados, ola?: Ola) {
+    const cuenta = (estado: EstadoResultado) => resultados.filter((r) => r.estado === estado).length;
+
+    return {
+      ola: ola || null,
+      estudiantes: resultados.length,
+      clasifican: cuenta('CLASIFICA'),
+      noClasifican: cuenta('NO_CLASIFICA'),
+      enEvaluacion: cuenta('EN_EVALUACION'),
+      empates: cuenta('EMPATE'),
+      pendientes: cuenta('EN_EVALUACION') + cuenta('EMPATE'),
+      delegaciones: new Set(resultados.map((r) => r.grupoId)).size,
+      publicado: config.publicado,
+      publicadoEn: config.publicadoEn,
+      porcentaje: config.porcentaje,
+      tituloPublico: config.tituloPublico,
+      agrupadoPor: config.agrupadoPor,
+      consultaActiva: config.consultaActiva,
+    };
+  }
+
+  /** Los pozos de una tanda, que es como se revisa en pantalla. */
+  async porDelegacion(ola?: Ola) {
+    const { resultados, config } = ola ? await this.calcular(ola) : await this.calcularTodo();
+
+    const grupos = new Map<string, any>();
+    for (const r of resultados) {
+      const llave = `${r.ola}|${r.grupoId}|${r.categoria}`;
+      if (!grupos.has(llave)) {
+        grupos.set(llave, {
+          llave,
+          grupoId: r.grupoId,
+          grupoNombre: r.grupoNombre,
+          categoria: r.categoria,
+          grado: GRADOS.find((g) => g.categoria === r.categoria)?.label || '',
+          tutor: r.tutor,
+          celular: r.celular,
+          ola: r.ola,
+          alumnos: [],
+        });
+      }
+      grupos.get(llave).alumnos.push(r);
+    }
+
+    const lista = [...grupos.values()].map((g) => ({
+      ...g,
+      total: g.alumnos.length,
+      cupos: this.cupos(g.alumnos.length, config.porcentaje),
+      clasifican: g.alumnos.filter((a: Resultado) => a.estado === 'CLASIFICA').length,
+      pendientes: g.alumnos.filter(
+        (a: Resultado) => a.estado === 'EMPATE' || a.estado === 'EN_EVALUACION',
+      ).length,
+    }));
+
+    return {
+      grupos: lista,
+      resumen: this.resumir(resultados, config, ola),
+      agrupaciones: config.agrupaciones,
+    };
+  }
+
+  /** El tablero final: cada tanda y el total, para publicar lo general. */
+  async general() {
+    const [config, tutores, comision] = await Promise.all([
+      this.config(),
+      this.calcular('tutores'),
+      this.calcular('comision'),
+    ]);
+
+    const todos = [...tutores.resultados, ...comision.resultados];
+
+    return {
+      tutores: this.resumir(tutores.resultados, config, 'tutores'),
+      comision: this.resumir(comision.resultados, config, 'comision'),
+      total: this.resumir(todos, config),
+      categorias: this.porCategoria(todos.filter((r) => r.estado === 'CLASIFICA')),
+    };
+  }
+
+  private porCategoria(lista: Resultado[]) {
+    return [...new Set(lista.map((r) => r.categoria))].sort().map((categoria) => ({
+      categoria,
+      grado: GRADOS.find((g) => g.categoria === categoria)?.label || '',
+      clasifican: lista.filter((r) => r.categoria === categoria).length,
+    }));
+  }
+
+  // --------------------------------------------------------------- decisiones
+
+  async decidir(clave: string, estado: 'CLASIFICA' | 'NO_CLASIFICA' | null, ola?: Ola) {
+    const config = await this.config();
+
+    if (estado === null) delete config.manual[clave];
+    else config.manual[clave] = estado;
+
+    await this.guardar(config);
+    this.log.warn(`Decisión manual sobre ${clave}: ${estado ?? 'se devolvió al cálculo'}.`);
+    return this.porDelegacion(ola);
+  }
+
+  async crearAgrupacion(datos: { nombre?: string; delegacionId?: string | null }) {
+    const config = await this.config();
+    const nombre = (datos.nombre || '').trim();
+
+    if (!datos.delegacionId && !nombre) {
+      throw new BadRequestException('Póngale un nombre al grupo');
+    }
+
+    const grupo: Agrupacion = {
+      id: randomUUID(),
+      nombre: nombre || 'Agrupación',
+      delegacionId: datos.delegacionId || null,
+      miembros: [],
+    };
+
+    config.agrupaciones.push(grupo);
+    await this.guardar(config);
+    return grupo;
+  }
+
+  async cambiarAgrupacion(id: string, datos: { nombre?: string; miembros?: string[] }, ola?: Ola) {
+    const config = await this.config();
+    const grupo = config.agrupaciones.find((g) => g.id === id);
+    if (!grupo) throw new NotFoundException('Ese grupo no existe');
+
+    if (datos.nombre !== undefined) grupo.nombre = datos.nombre.trim() || grupo.nombre;
+    if (datos.miembros !== undefined) {
+      // Nadie puede estar en dos pozos a la vez.
+      grupo.miembros = [...new Set(datos.miembros)];
+      for (const otro of config.agrupaciones) {
+        if (otro.id === id) continue;
+        otro.miembros = otro.miembros.filter((m) => !grupo.miembros.includes(m));
+      }
+    }
+
+    await this.guardar(config);
+    return this.porDelegacion(ola);
+  }
+
+  async borrarAgrupacion(id: string, ola?: Ola) {
+    const config = await this.config();
+    config.agrupaciones = config.agrupaciones.filter((g) => g.id !== id);
+    await this.guardar(config);
+    return this.porDelegacion(ola);
+  }
+
+  /** Quiénes están solos en su categoría dentro de la tanda. */
+  async individuales(ola?: Ola) {
+    const { resultados } = ola ? await this.calcular(ola) : await this.calcularTodo();
+
+    const porPozo = new Map<string, number>();
+    for (const r of resultados) {
+      const llave = `${r.ola}|${r.grupoId}|${r.categoria}`;
+      porPozo.set(llave, (porPozo.get(llave) || 0) + 1);
+    }
+
+    return resultados
+      .filter((r) => porPozo.get(`${r.ola}|${r.grupoId}|${r.categoria}`) === 1)
+      .sort(
+        (a, b) =>
+          a.categoria.localeCompare(b.categoria) || a.nombres.localeCompare(b.nombres, 'es'),
+      );
+  }
+
+  async empates(ola?: Ola) {
+    const { resultados } = ola ? await this.calcular(ola) : await this.calcularTodo();
+    return resultados.filter((r) => r.estado === 'EMPATE');
+  }
+
+  async cambiarPorcentaje(porcentaje: number, ola?: Ola) {
+    const valor = Number(porcentaje);
+    if (!Number.isFinite(valor) || valor < 1 || valor > 100) {
+      throw new BadRequestException('El porcentaje debe estar entre 1 y 100');
+    }
+
+    const config = await this.config();
+    config.porcentaje = Math.round(valor);
+    await this.guardar(config);
+    return this.porDelegacion(ola);
+  }
+
+  // --------------------------------------------------------------- publicación
+
+  async publicar(ola: Ola, publicado: boolean) {
+    if (ola !== 'tutores' && ola !== 'comision') {
+      throw new BadRequestException('Tanda desconocida');
+    }
+
+    const config = await this.config();
+    config.publicado[ola] = publicado;
+    config.publicadoEn[ola] = publicado ? new Date().toISOString() : null;
+    await this.guardar(config);
+
+    this.log.warn(`Resultados de la tanda «${ola}»: ${publicado ? 'publicados' : 'ocultados'}.`);
+    return this.general();
+  }
+
+  /** El botón del final: las dos tandas de una vez. */
+  async publicarGeneral(publicado: boolean) {
+    const config = await this.config();
+    const cuando = publicado ? new Date().toISOString() : null;
+
+    for (const ola of ['tutores', 'comision'] as Ola[]) {
+      config.publicado[ola] = publicado;
+      config.publicadoEn[ola] = cuando;
+    }
+
+    await this.guardar(config);
+    this.log.warn(`Resultados generales: ${publicado ? 'publicados' : 'ocultados'}.`);
+    return this.general();
+  }
+
+  /** Lo que ve cualquiera en la portada: solo lo publicado y solo quien pasó. */
+  async publicos() {
+    const { resultados, config } = await this.calcularTodo();
+    const visibles = resultados.filter((r) => r.estado === 'CLASIFICA' && config.publicado[r.ola]);
+
+    const porCategoria = config.agrupadoPor === 'categoria';
+    const llaves = [
+      ...new Set(visibles.map((r) => (porCategoria ? r.categoria : r.grupoNombre))),
+    ].sort((a, b) => a.localeCompare(b, 'es'));
+
+    const bloques = llaves.map((llave) => {
+      const suyos = visibles.filter(
+        (r) => (porCategoria ? r.categoria : r.grupoNombre) === llave,
+      );
+
+      return {
+        llave,
+        titulo: porCategoria ? `CAT. ${llave}` : llave,
+        detalle: porCategoria
+          ? GRADOS.find((g) => g.categoria === llave)?.label || ''
+          : `${suyos.length} ${suyos.length === 1 ? 'clasificado' : 'clasificados'}`,
+        alumnos: suyos
+          .sort(
+            (a, b) =>
+              (porCategoria
+                ? a.grupoNombre.localeCompare(b.grupoNombre, 'es')
+                : a.categoria.localeCompare(b.categoria)) ||
+              b.puntaje - a.puntaje ||
+              a.nombres.localeCompare(b.nombres, 'es'),
+          )
+          .map((r) => ({
+            nombres: r.nombres,
+            // Al agrupar por delegación lo que distingue es la categoría.
+            detalle: porCategoria ? r.grupoNombre : `CAT. ${r.categoria}`,
+          })),
+      };
+    });
+
+    return {
+      hayAlgo: visibles.length > 0,
+      titulo: config.tituloPublico,
+      agrupadoPor: config.agrupadoPor,
+      consultaActiva: config.consultaActiva,
+      bloques,
+    };
+  }
+
+  /** La consulta por DNI de la portada, que se enciende aparte. */
+  async consultar(dni: string) {
+    const config = await this.config();
+    if (!config.consultaActiva) {
+      throw new NotFoundException('La consulta de puntajes todavía no está habilitada.');
+    }
+
+    const limpio = String(dni || '').trim();
+    if (!/^\d{6,12}$/.test(limpio)) {
+      throw new BadRequestException('Escriba un DNI válido');
+    }
+
+    const { resultados } = await this.calcularTodo();
+    const suyos = resultados.filter((r) => r.dni === limpio && config.publicado[r.ola]);
+
+    if (suyos.length === 0) {
+      throw new NotFoundException(
+        'Todavía no hay resultados publicados para ese DNI. Vuelva a intentarlo más tarde.',
+      );
+    }
+
+    return suyos.map((r) => ({
+      nombres: r.nombres,
+      institucion: r.grupoNombre,
+      categoria: r.categoria,
+      grado: GRADOS.find((g) => g.categoria === r.categoria)?.label || '',
+      puntaje: r.puntaje,
+      puesto: r.puesto,
+      clasifica: r.estado === 'CLASIFICA',
+    }));
+  }
+
+  // -------------------------------------------------------------------- Excel
+
+  async excel(
+    soloClasificados: boolean,
+    ola?: Ola,
+  ): Promise<{ buffer: Buffer; nombre: string }> {
+    const { resultados, config } = ola ? await this.calcular(ola) : await this.calcularTodo();
+    const lista = soloClasificados
+      ? resultados.filter((r) => r.estado === 'CLASIFICA')
+      : resultados;
+
+    const libro = new ExcelJS.Workbook();
+    libro.creator = 'I OMASUR UNI 2026';
+
+    const categorias = [...new Set(lista.map((r) => r.categoria))].sort();
+    const deQuien = ola === 'tutores' ? ' · enviadas por los tutores' : ola === 'comision' ? ' · llenadas por la comisión' : '';
+
+    for (const categoria of categorias) {
+      const grado = GRADOS.find((g) => g.categoria === categoria);
+      const hoja = libro.addWorksheet(`CAT. ${categoria}`);
+
+      const columnas = [
+        { header: 'N°', width: 6 },
+        { header: 'INSTITUCIÓN EDUCATIVA', width: 40 },
+        { header: 'TUTOR', width: 30 },
+        { header: 'CELULAR', width: 14 },
+        { header: 'DNI', width: 14 },
+        { header: 'APELLIDOS Y NOMBRES', width: 38 },
+        { header: 'PUESTO', width: 10 },
+        { header: 'PUNTAJE', width: 12 },
+        ...(soloClasificados ? [] : [{ header: 'ESTADO', width: 18 }]),
+      ];
+
+      const suyos = lista
+        .filter((r) => r.categoria === categoria)
+        .sort(
+          (a, b) =>
+            a.grupoNombre.localeCompare(b.grupoNombre, 'es') ||
+            b.puntaje - a.puntaje ||
+            a.nombres.localeCompare(b.nombres, 'es'),
+        );
+
+      escribirTitulo(
+        hoja,
+        columnas.length,
+        soloClasificados
+          ? `Clasificados · CAT. ${categoria} · ${grado?.label || ''}`
+          : `Resultados · CAT. ${categoria} · ${grado?.label || ''}`,
+        `Etapa institucional · clasifica el ${config.porcentaje}% de cada delegación${deQuien}`,
+        suyos.length,
+      );
+      escribirEncabezados(hoja, columnas);
+
+      suyos.forEach((r, i) => {
+        const fila = hoja.addRow([
+          i + 1,
+          r.grupoNombre,
+          r.tutor,
+          r.celular,
+          r.dni,
+          r.nombres,
+          r.puesto,
+          r.puntaje,
+          ...(soloClasificados ? [] : [ETIQUETAS[r.estado]]),
+        ]);
+        fila.getCell(5).numFmt = '@';
+        fila.getCell(8).font = { bold: true, color: { argb: GRANATE } };
+
+        if (!soloClasificados) {
+          fila.getCell(9).font = { bold: true, color: { argb: COLOR_ESTADO[r.estado] } };
+        }
+      });
+    }
+
+    if (categorias.length === 0) {
+      libro.addWorksheet('Sin datos').getCell('A1').value = 'Todavía no hay resultados.';
+    }
+
+    const sufijo = ola ? `-${ola}` : '';
+    return {
+      buffer: (await libro.xlsx.writeBuffer()) as unknown as Buffer,
+      nombre: nombreArchivo(
+        (soloClasificados ? 'clasificados-etapa-institucional' : 'resultados-etapa-institucional') +
+          sufijo,
+      ),
+    };
+  }
+}
+
+const ETIQUETAS: Record<EstadoResultado, string> = {
+  CLASIFICA: 'Clasifica',
+  NO_CLASIFICA: 'No clasifica',
+  EN_EVALUACION: 'En evaluación',
+  EMPATE: 'Empate',
+};
+
+const COLOR_ESTADO: Record<EstadoResultado, string> = {
+  CLASIFICA: 'FF047857',
+  NO_CLASIFICA: 'FF6B7280',
+  EN_EVALUACION: 'FFB91C1C',
+  EMPATE: 'FFB45309',
+};

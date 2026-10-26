@@ -1,12 +1,17 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
+  Award,
   ClipboardList,
   FileSpreadsheet,
   FlaskConical,
   Inbox,
   ListChecks,
+  Megaphone,
   Search,
+  Trophy,
   Upload,
+  UserCheck,
+  Users,
 } from 'lucide-react';
 import PanelLayout from '../layouts/PanelLayout.jsx';
 import { ExamenLlenar } from '../components/ExamenDelegacion.jsx';
@@ -19,7 +24,13 @@ import {
 } from '../components/ExamenEntregas.jsx';
 import Campanita from '../components/Campanita.jsx';
 import AvisosEnVivo from '../components/AvisosEnVivo.jsx';
+import {
+  AjustesPublicacion,
+  ModuloResultados,
+  ResultadosGeneral,
+} from '../components/Resultados.jsx';
 import { NotificacionesProvider } from '../lib/notificaciones.jsx';
+import { api } from '../lib/api';
 
 /**
  * Panel del supervisor: solo el examen.
@@ -38,6 +49,19 @@ const SECCIONES = [
   { id: 'clave', texto: 'Respuestas correctas', icono: ListChecks },
 ];
 
+/** Solo para el supervisor que el administrador puso a cargo. */
+const SECCION_RESULTADOS = {
+  id: 'resultados',
+  texto: 'Resultados',
+  icono: Trophy,
+  hijos: [
+    { id: 'res-tutores', texto: 'Enviadas por tutores', icono: UserCheck },
+    { id: 'res-comision', texto: 'Llenadas por comisión', icono: Users },
+    { id: 'res-general', texto: 'General y publicación', icono: Award },
+    { id: 'res-publicacion', texto: 'Cómo se publica', icono: Megaphone },
+  ],
+};
+
 const TITULOS = {
   llenar: 'Examen · Llenar por delegación',
   entregas: 'Examen · Entregas recibidas',
@@ -46,6 +70,10 @@ const TITULOS = {
   enviadas: 'Examen · Respuestas enviadas',
   prueba: 'Examen · Prueba de envío',
   clave: 'Examen · Respuestas correctas',
+  'res-tutores': 'Resultados · Enviadas por los tutores',
+  'res-comision': 'Resultados · Llenadas por la comisión',
+  'res-general': 'Resultados · General y publicación',
+  'res-publicacion': 'Resultados · Cómo se publica',
 };
 
 export default function PanelSupervisor() {
@@ -58,12 +86,23 @@ export default function PanelSupervisor() {
 
 function Contenido() {
   const [seccion, setSeccion] = useState('llenar');
+  // El administrador decide quién ve los resultados; aquí solo se pregunta.
+  const [aCargo, setACargo] = useState(false);
+
+  useEffect(() => {
+    api
+      .get('/resultados/acceso')
+      .then(({ data }) => setACargo(Boolean(data.puede)))
+      .catch(() => setACargo(false));
+  }, []);
+
+  const secciones = aCargo ? [SECCION_RESULTADOS, ...SECCIONES] : SECCIONES;
 
   return (
     <PanelLayout
       compacto
       titulo={TITULOS[seccion]}
-      secciones={SECCIONES}
+      secciones={secciones}
       actual={seccion}
       alCambiar={setSeccion}
       acciones={<Campanita />}
@@ -74,6 +113,15 @@ function Contenido() {
       {seccion === 'llenar' && <ExamenLlenar />}
       {seccion === 'consultas' && <ExamenConsultas />}
       {seccion === 'consolidado' && <ExamenConsolidado />}
+
+      {aCargo && (
+        <>
+          {seccion === 'res-tutores' && <ModuloResultados ola="tutores" />}
+          {seccion === 'res-comision' && <ModuloResultados ola="comision" />}
+          {seccion === 'res-general' && <ResultadosGeneral />}
+          {seccion === 'res-publicacion' && <AjustesPublicacion />}
+        </>
+      )}
       {seccion === 'enviadas' && <ExamenEnviadas />}
       {seccion === 'prueba' && <ExamenPrueba />}
       {seccion === 'clave' && <ExamenClave />}
