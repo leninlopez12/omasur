@@ -76,10 +76,11 @@ export class ResultadosController {
     return this.resultados.general();
   }
 
+  /** De las dos tandas: los sueltos se trabajan en un solo lugar. */
   @UseGuards(JwtAuthGuard, EncargadoGuard)
   @Get('individuales')
-  individuales(@Query('ola') ola?: string) {
-    return this.resultados.individuales(tanda(ola));
+  individuales() {
+    return this.resultados.individuales();
   }
 
   @UseGuards(JwtAuthGuard, EncargadoGuard)

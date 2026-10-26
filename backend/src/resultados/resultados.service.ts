@@ -78,6 +78,8 @@ export interface Resultado extends Alumno {
   puesto: number;
   estado: EstadoResultado;
   manual: boolean;
+  /** Entró con el mismo puntaje del último cupo. Pasa igual. */
+  empatado: boolean;
 }
 
 /**
@@ -249,15 +251,15 @@ export class ResultadosService {
   }
 
   /**
-   * La tabla de una tanda.
+   * La tabla completa.
    *
-   * El filtro va antes de armar los pozos, no después: así trabajar la tanda
-   * de los tutores no depende de lo que todavía no cargó la comisión, y lo
-   * que se revise y publique ahí ya no se mueve.
+   * El cálculo es uno solo porque los pozos pueden cruzar tandas: a un
+   * estudiante que quedó solo se le junta con la delegación que sea. La tanda
+   * de cada resultado la decide su pozo, no su origen, que es lo que hace que
+   * «donde compite» y «dónde se publica» sean siempre lo mismo.
    */
-  async calcular(ola?: Ola) {
-    const [config, todos] = await Promise.all([this.config(), this.alumnos()]);
-    const alumnos = ola ? todos.filter((a) => a.ola === ola) : todos;
+  async calcular() {
+    const [config, alumnos] = await Promise.all([this.config(), this.alumnos()]);
 
     const pozoDe = new Map<string, { id: string; nombre: string; agrupado: boolean }>();
     for (const a of alumnos) {
@@ -281,6 +283,13 @@ export class ResultadosService {
       }
     }
 
+    // La tanda del pozo: la de su delegación, o la de la comisión cuando es un
+    // grupo armado a mano, que es donde se trabajan los sueltos.
+    const olaDelPozo = (pozoId: string): Ola => {
+      if (pozoId.startsWith('grupo:')) return 'comision';
+      return alumnos.find((a) => a.tutorId === pozoId)?.ola || 'comision';
+    };
+
     const pozos = new Map<string, Alumno[]>();
     for (const a of alumnos) {
       const pozo = pozoDe.get(a.clave)!;
@@ -298,8 +307,9 @@ export class ResultadosService {
       const corte = cupos > 0 ? lista[cupos - 1].puntaje : null;
       const mejores = corte === null ? 0 : lista.filter((a) => a.puntaje > corte).length;
       const empatados = corte === null ? 0 : lista.filter((a) => a.puntaje === corte).length;
-      // Si los empatados en el corte caben, pasan todos; si no, lo decide alguien.
-      const empateReal = corte !== null && empatados > cupos - mejores;
+      // Empatados en el corte: pasan todos, aunque el pozo se pase del cupo.
+      // Desempatar a mano sería inventar un criterio que nadie acordó.
+      const huboEmpate = corte !== null && empatados > cupos - mejores;
 
       lista.forEach((alumno, i) => {
         const pozo = pozoDe.get(alumno.clave)!;
@@ -308,18 +318,18 @@ export class ResultadosService {
         let estado: EstadoResultado;
         if (lista.length === 1) estado = 'EN_EVALUACION';
         else if (corte === null) estado = 'NO_CLASIFICA';
-        else if (alumno.puntaje > corte) estado = 'CLASIFICA';
-        else if (alumno.puntaje === corte) estado = empateReal ? 'EMPATE' : 'CLASIFICA';
-        else estado = 'NO_CLASIFICA';
+        else estado = alumno.puntaje >= corte ? 'CLASIFICA' : 'NO_CLASIFICA';
 
         resultados.push({
           ...alumno,
+          ola: olaDelPozo(pozo.id),
           grupoId: pozo.id,
           grupoNombre: pozo.nombre,
           agrupado: pozo.agrupado,
           puesto: i + 1,
           estado: decision || estado,
           manual: Boolean(decision),
+          empatado: huboEmpate && corte !== null && alumno.puntaje === corte,
         });
       });
     }
@@ -334,17 +344,9 @@ export class ResultadosService {
     return { config, resultados };
   }
 
-  /** Las dos tandas juntas, cada una calculada en su propio pozo. */
+  /** Alias de `calcular`: la tabla ya sale con las dos tandas marcadas. */
   async calcularTodo() {
-    const [tutores, comision] = await Promise.all([
-      this.calcular('tutores'),
-      this.calcular('comision'),
-    ]);
-
-    return {
-      config: tutores.config,
-      resultados: [...tutores.resultados, ...comision.resultados],
-    };
+    return this.calcular();
   }
 
   private resumir(resultados: Resultado[], config: ConfigResultados, ola?: Ola) {
@@ -356,8 +358,9 @@ export class ResultadosService {
       clasifican: cuenta('CLASIFICA'),
       noClasifican: cuenta('NO_CLASIFICA'),
       enEvaluacion: cuenta('EN_EVALUACION'),
-      empates: cuenta('EMPATE'),
-      pendientes: cuenta('EN_EVALUACION') + cuenta('EMPATE'),
+      empates: resultados.filter((r) => r.empatado).length,
+      // Lo único que frena una publicación es quien sigue sin resolver.
+      pendientes: cuenta('EN_EVALUACION'),
       delegaciones: new Set(resultados.map((r) => r.grupoId)).size,
       publicado: config.publicado,
       publicadoEn: config.publicadoEn,
@@ -370,7 +373,8 @@ export class ResultadosService {
 
   /** Los pozos de una tanda, que es como se revisa en pantalla. */
   async porDelegacion(ola?: Ola) {
-    const { resultados, config } = ola ? await this.calcular(ola) : await this.calcularTodo();
+    const { resultados: todos, config } = await this.calcular();
+    const resultados = ola ? todos.filter((r) => r.ola === ola) : todos;
 
     const grupos = new Map<string, any>();
     for (const r of resultados) {
@@ -410,19 +414,21 @@ export class ResultadosService {
 
   /** El tablero final: cada tanda y el total, para publicar lo general. */
   async general() {
-    const [config, tutores, comision] = await Promise.all([
-      this.config(),
-      this.calcular('tutores'),
-      this.calcular('comision'),
-    ]);
-
-    const todos = [...tutores.resultados, ...comision.resultados];
+    const { resultados, config } = await this.calcular();
 
     return {
-      tutores: this.resumir(tutores.resultados, config, 'tutores'),
-      comision: this.resumir(comision.resultados, config, 'comision'),
-      total: this.resumir(todos, config),
-      categorias: this.porCategoria(todos.filter((r) => r.estado === 'CLASIFICA')),
+      tutores: this.resumir(
+        resultados.filter((r) => r.ola === 'tutores'),
+        config,
+        'tutores',
+      ),
+      comision: this.resumir(
+        resultados.filter((r) => r.ola === 'comision'),
+        config,
+        'comision',
+      ),
+      total: this.resumir(resultados, config),
+      categorias: this.porCategoria(resultados.filter((r) => r.estado === 'CLASIFICA')),
     };
   }
 
@@ -493,27 +499,34 @@ export class ResultadosService {
     return this.porDelegacion(ola);
   }
 
-  /** Quiénes están solos en su categoría dentro de la tanda. */
-  async individuales(ola?: Ola) {
-    const { resultados } = ola ? await this.calcular(ola) : await this.calcularTodo();
+  /**
+   * Quiénes están solos en su categoría, de las dos tandas.
+   *
+   * No se separan por tanda a propósito: a uno que quedó solo se le junta con
+   * la delegación que haga falta, venga de donde venga, y partir la lista
+   * obligaría a buscarlo en dos pantallas.
+   */
+  async individuales() {
+    const { resultados } = await this.calcular();
 
     const porPozo = new Map<string, number>();
     for (const r of resultados) {
-      const llave = `${r.ola}|${r.grupoId}|${r.categoria}`;
+      const llave = `${r.grupoId}|${r.categoria}`;
       porPozo.set(llave, (porPozo.get(llave) || 0) + 1);
     }
 
     return resultados
-      .filter((r) => porPozo.get(`${r.ola}|${r.grupoId}|${r.categoria}`) === 1)
+      .filter((r) => porPozo.get(`${r.grupoId}|${r.categoria}`) === 1)
       .sort(
         (a, b) =>
           a.categoria.localeCompare(b.categoria) || a.nombres.localeCompare(b.nombres, 'es'),
       );
   }
 
+  /** Quiénes entraron por empate. Es informativo: todos ellos clasifican. */
   async empates(ola?: Ola) {
-    const { resultados } = ola ? await this.calcular(ola) : await this.calcularTodo();
-    return resultados.filter((r) => r.estado === 'EMPATE');
+    const { resultados } = await this.calcular();
+    return resultados.filter((r) => r.empatado && (!ola || r.ola === ola));
   }
 
   async cambiarPorcentaje(porcentaje: number, ola?: Ola) {
@@ -644,10 +657,11 @@ export class ResultadosService {
     soloClasificados: boolean,
     ola?: Ola,
   ): Promise<{ buffer: Buffer; nombre: string }> {
-    const { resultados, config } = ola ? await this.calcular(ola) : await this.calcularTodo();
+    const { resultados: todos, config } = await this.calcular();
+    const deLaTanda = ola ? todos.filter((r) => r.ola === ola) : todos;
     const lista = soloClasificados
-      ? resultados.filter((r) => r.estado === 'CLASIFICA')
-      : resultados;
+      ? deLaTanda.filter((r) => r.estado === 'CLASIFICA')
+      : deLaTanda;
 
     const libro = new ExcelJS.Workbook();
     libro.creator = 'I OMASUR UNI 2026';

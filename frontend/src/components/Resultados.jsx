@@ -40,13 +40,28 @@ const TANDAS = {
   },
 };
 
-const PASOS = [
-  { id: 'clasificacion', texto: 'Clasificación' },
-  { id: 'individuales', texto: 'Individuales' },
-  { id: 'empates', texto: 'Empates' },
-  { id: 'revisar', texto: 'Revisar' },
-  { id: 'publicar', texto: 'Publicar' },
-];
+/**
+ * Los individuales se trabajan una sola vez, en la tanda de la comisión.
+ *
+ * A un estudiante que quedó solo se le junta con la delegación que haga
+ * falta, sea de la tanda que sea, así que tenerlos en dos pantallas obligaría
+ * a buscarlo dos veces.
+ */
+const PASOS = {
+  tutores: [
+    { id: 'clasificacion', texto: 'Clasificación' },
+    { id: 'empates', texto: 'Empates' },
+    { id: 'revisar', texto: 'Revisar' },
+    { id: 'publicar', texto: 'Publicar' },
+  ],
+  comision: [
+    { id: 'clasificacion', texto: 'Clasificación' },
+    { id: 'individuales', texto: 'Individuales' },
+    { id: 'empates', texto: 'Empates' },
+    { id: 'revisar', texto: 'Revisar' },
+    { id: 'publicar', texto: 'Publicar' },
+  ],
+};
 
 /** La tabla de una tanda. */
 function useResultados(ola) {
@@ -73,12 +88,13 @@ function Cifras({ resumen }) {
   const datos = [
     { valor: resumen.estudiantes, texto: 'Estudiantes con puntaje' },
     { valor: resumen.clasifican, texto: 'Clasifican' },
-    { valor: resumen.empates, texto: 'Empates por resolver' },
+    { valor: resumen.noClasifican, texto: 'No clasifican' },
     { valor: resumen.enEvaluacion, texto: 'En evaluación' },
+    ...(resumen.empates > 0 ? [{ valor: resumen.empates, texto: 'Pasaron por empate' }] : []),
   ];
 
   return (
-    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-5">
       {datos.map((d) => (
         <div key={d.texto} className="rounded-3xl bg-white p-6 shadow-suave">
           <p className="text-4xl font-black text-granate-700">{d.valor}</p>
@@ -113,6 +129,11 @@ export function ModuloResultados({ ola }) {
   const tanda = TANDAS[ola];
   const pendientes = datos.resumen.pendientes;
 
+  // Los empates no se resuelven, solo se consultan: si no hubo ninguno, la
+  // pestaña sobra y sería una pantalla vacía más que abrir.
+  const pasos = PASOS[ola].filter((p) => p.id !== 'empates' || datos.resumen.empates > 0);
+  const actual = pasos.some((p) => p.id === paso) ? paso : 'clasificacion';
+
   return (
     <div className="space-y-6">
       <Tarjeta>
@@ -120,10 +141,11 @@ export function ModuloResultados({ ola }) {
         <p className="mt-2 text-xl text-slate-600">{tanda.detalle}</p>
 
         <div className="mt-6 flex flex-wrap gap-2">
-          {PASOS.map((p) => {
+          {pasos.map((p) => {
             const pendiente =
               (p.id === 'empates' && datos.resumen.empates > 0) ||
               (p.id === 'individuales' && datos.resumen.enEvaluacion > 0);
+            const urge = p.id === 'individuales';
 
             return (
               <button
@@ -131,7 +153,7 @@ export function ModuloResultados({ ola }) {
                 type="button"
                 onClick={() => setPaso(p.id)}
                 className={`rounded-xl px-4 py-2 text-base font-bold transition ${
-                  paso === p.id
+                  actual === p.id
                     ? 'bg-granate-600 text-white'
                     : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                 }`}
@@ -140,7 +162,11 @@ export function ModuloResultados({ ola }) {
                 {pendiente && (
                   <span
                     className={`ml-2 rounded-full px-2 py-0.5 text-sm ${
-                      paso === p.id ? 'bg-white/25' : 'bg-amber-200 text-amber-900'
+                      actual === p.id
+                        ? 'bg-white/25'
+                        : urge
+                          ? 'bg-rose-200 text-rose-900'
+                          : 'bg-amber-200 text-amber-900'
                     }`}
                   >
                     {p.id === 'empates' ? datos.resumen.empates : datos.resumen.enEvaluacion}
@@ -160,13 +186,13 @@ export function ModuloResultados({ ola }) {
         </Tarjeta>
       ) : (
         <>
-          {paso === 'clasificacion' && (
-            <Clasificacion ola={ola} datos={datos} setDatos={setDatos} recargar={recargar} />
+          {actual === 'clasificacion' && (
+            <Clasificacion ola={ola} datos={datos} recargar={recargar} />
           )}
-          {paso === 'individuales' && <Individuales ola={ola} tabla={datos} alCambiar={recargar} />}
-          {paso === 'empates' && <Empates ola={ola} alCambiar={recargar} />}
-          {paso === 'revisar' && <Revisar ola={ola} resumen={datos.resumen} />}
-          {paso === 'publicar' && (
+          {actual === 'individuales' && <Individuales alCambiar={recargar} />}
+          {actual === 'empates' && <Empates ola={ola} />}
+          {actual === 'revisar' && <Revisar ola={ola} resumen={datos.resumen} />}
+          {actual === 'publicar' && (
             <Publicar ola={ola} resumen={datos.resumen} pendientes={pendientes} alCambiar={recargar} />
           )}
         </>
@@ -175,7 +201,7 @@ export function ModuloResultados({ ola }) {
   );
 }
 
-/** Los tres botones con que se fuerza o se devuelve una decisión. */
+/** Los tres botones con que se decide a mano. Solo en los individuales. */
 function Decision({ alumno, alDecidir, guardando }) {
   const botones = [
     { valor: 'CLASIFICA', texto: 'Clasifica' },
@@ -206,28 +232,16 @@ function Decision({ alumno, alDecidir, guardando }) {
   );
 }
 
-function Clasificacion({ ola, datos, setDatos, recargar }) {
+/**
+ * La clasificación, para mirarla.
+ *
+ * Aquí no se decide nada: el corte sale del porcentaje, los empatados pasan
+ * todos y lo único que queda a criterio —los que quedaron solos— se resuelve
+ * en su propia pantalla.
+ */
+function Clasificacion({ ola, datos, recargar }) {
   const [buscar, setBuscar] = useState('');
   const [filtro, setFiltro] = useState('');
-  const [guardando, setGuardando] = useState(false);
-  const [aviso, setAviso] = useState('');
-
-  const decidir = async (clave, valor) => {
-    setAviso('');
-    setGuardando(true);
-    try {
-      const { data } = await api.post(
-        '/resultados/decidir',
-        { clave, estado: valor },
-        { params: { ola } },
-      );
-      setDatos(data);
-    } catch (e) {
-      setAviso(mensajeError(e, 'No se pudo guardar la decisión'));
-    } finally {
-      setGuardando(false);
-    }
-  };
 
   const grupos = useMemo(() => {
     const texto = sinTildes(buscar);
@@ -252,12 +266,6 @@ function Clasificacion({ ola, datos, setDatos, recargar }) {
           titulo={`${datos.resumen.pendientes} por resolver antes de publicar`}
         >
           Los empates y los que están solos en su categoría necesitan una decisión suya.
-        </Aviso>
-      )}
-
-      {aviso && (
-        <Aviso tipo="error" icono={AlertCircle}>
-          {aviso}
         </Aviso>
       )}
 
@@ -308,7 +316,6 @@ function Clasificacion({ ola, datos, setDatos, recargar }) {
                     <th className="px-4 py-3 font-semibold">Estudiante</th>
                     <th className="px-4 py-3 text-center font-semibold">Puntaje</th>
                     <th className="px-4 py-3 font-semibold">Estado</th>
-                    <th className="px-4 py-3" />
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -331,9 +338,12 @@ function Clasificacion({ ola, datos, setDatos, recargar }) {
                         <Etiqueta compacto className={COLOR[a.estado]}>
                           {ETIQUETA[a.estado]}
                         </Etiqueta>
-                      </td>
-                      <td className="px-4 py-3">
-                        <Decision alumno={a} alDecidir={decidir} guardando={guardando} />
+                        {a.empatado && (
+                          <span className="mt-1 block text-base text-amber-700">por empate</span>
+                        )}
+                        {a.manual && (
+                          <span className="mt-1 block text-base text-slate-500">decidido a mano</span>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -354,34 +364,40 @@ function Clasificacion({ ola, datos, setDatos, recargar }) {
  * que alguien decida, o hasta que se le junte con una delegación o con otros
  * individuales para que compitan entre ellos.
  */
-function Individuales({ ola, tabla, alCambiar }) {
+function Individuales({ alCambiar }) {
   const [solos, setSolos] = useState(null);
+  const [tabla, setTabla] = useState(null);
   const [error, setError] = useState('');
   const [nombre, setNombre] = useState('');
   const [anfitriona, setAnfitriona] = useState('');
   const [procesando, setProcesando] = useState(false);
 
+  // Sin filtro de tanda: los sueltos de los tutores también se resuelven aquí.
   const cargar = useCallback(async () => {
     try {
-      const { data } = await api.get('/resultados/individuales', { params: { ola } });
-      setSolos(data);
+      const [uno, dos] = await Promise.all([
+        api.get('/resultados/individuales'),
+        api.get('/resultados'),
+      ]);
+      setSolos(uno.data);
+      setTabla(dos.data);
     } catch (e) {
       setError(mensajeError(e, 'No se pudieron cargar los individuales'));
     }
-  }, [ola]);
+  }, []);
 
   useEffect(() => {
     cargar();
   }, [cargar]);
 
-  if (error) {
+  if (error && !solos) {
     return (
       <Aviso tipo="error" icono={AlertCircle}>
         {error}
       </Aviso>
     );
   }
-  if (!solos) return <Cargando texto="Buscando estudiantes solos" />;
+  if (!solos || !tabla) return <Cargando texto="Buscando estudiantes solos" />;
 
   // Los miembros se guardan como «tutorId:dni»; el nombre sale de la tabla.
   const nombrePorClave = new Map(
@@ -392,7 +408,6 @@ function Individuales({ ola, tabla, alCambiar }) {
     .filter(([id]) => !id.startsWith('grupo:'))
     .sort((a, b) => a[1].localeCompare(b[1], 'es'));
 
-  // Solo los grupos que tienen a alguien de esta tanda, o los recién creados.
   const grupos = tabla.agrupaciones;
 
   const hacer = async (accion) => {
@@ -422,30 +437,28 @@ function Individuales({ ola, tabla, alCambiar }) {
 
   const mover = (grupo, clave) =>
     hacer(() =>
-      api.patch(
-        `/resultados/agrupaciones/${grupo.id}`,
-        { miembros: [...grupo.miembros, clave] },
-        { params: { ola } },
-      ),
+      api.patch(`/resultados/agrupaciones/${grupo.id}`, {
+        miembros: [...grupo.miembros, clave],
+      }),
     );
 
   const sacar = (grupo, clave) =>
     hacer(() =>
-      api.patch(
-        `/resultados/agrupaciones/${grupo.id}`,
-        { miembros: grupo.miembros.filter((m) => m !== clave) },
-        { params: { ola } },
-      ),
+      api.patch(`/resultados/agrupaciones/${grupo.id}`, {
+        miembros: grupo.miembros.filter((m) => m !== clave),
+      }),
     );
+
+  const decidir = (clave, estado) =>
+    hacer(() => api.post('/resultados/decidir', { clave, estado }));
 
   return (
     <div className="space-y-6">
       <Tarjeta>
         <h4 className="text-2xl font-black text-slate-900">Estudiantes individuales</h4>
         <p className="mt-2 text-xl text-slate-600">
-          Son los únicos de su categoría en su delegación. Júntelos con una delegación de esta
-          misma tanda que tenga esa categoría, o agrúpelos entre ellos, y el porcentaje se calcula
-          solo.
+          De las dos tandas: son los únicos de su categoría en su delegación. Júntelos con una
+          delegación que tenga esa categoría, agrúpelos entre ellos, o decida a mano.
         </p>
       </Tarjeta>
 
@@ -516,11 +529,7 @@ function Individuales({ ola, tabla, alCambiar }) {
                     variante="contorno"
                     tamano="chico"
                     cargando={procesando}
-                    onClick={() =>
-                      hacer(() =>
-                        api.delete(`/resultados/agrupaciones/${g.id}`, { params: { ola } }),
-                      )
-                    }
+                    onClick={() => hacer(() => api.delete(`/resultados/agrupaciones/${g.id}`))}
                   >
                     <Trash2 className="h-5 w-5" />
                     Deshacer
@@ -571,21 +580,33 @@ function Individuales({ ola, tabla, alCambiar }) {
             {solos.map((a) => (
               <div
                 key={a.clave}
-                className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border-2 border-rose-200 bg-rose-50/60 p-5"
+                className={`rounded-2xl border-2 p-5 ${
+                  a.estado === 'EN_EVALUACION'
+                    ? 'border-rose-200 bg-rose-50/60'
+                    : 'border-slate-200'
+                }`}
               >
-                <div>
-                  <p className="text-xl font-black text-slate-900">{a.nombres}</p>
-                  <p className="mt-1 text-base text-slate-600">
-                    {a.institucion} · CAT. {a.categoria} · {a.puntaje} puntos
-                  </p>
+                <div className="flex flex-wrap items-center justify-between gap-4">
+                  <div>
+                    <p className="text-xl font-black text-slate-900">{a.nombres}</p>
+                    <p className="mt-1 text-base text-slate-600">
+                      {a.institucion} · CAT. {a.categoria} · {a.puntaje} puntos ·{' '}
+                      {a.ola === 'tutores' ? 'tanda de tutores' : 'tanda de la comisión'}
+                    </p>
+                  </div>
+                  <Etiqueta compacto className={COLOR[a.estado]}>
+                    {ETIQUETA[a.estado]}
+                  </Etiqueta>
                 </div>
 
-                {grupos.length === 0 ? (
-                  <Etiqueta compacto className={COLOR.EN_EVALUACION}>
-                    En evaluación
-                  </Etiqueta>
-                ) : (
-                  <div className="flex flex-wrap items-center gap-2">
+                <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-slate-200 pt-4">
+                  <span className="text-base text-slate-600">Decidir a mano:</span>
+                  <Decision alumno={a} alDecidir={decidir} guardando={procesando} />
+                </div>
+
+                {grupos.length > 0 && (
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <span className="text-base text-slate-600">O juntarlo a:</span>
                     {grupos.map((g) => (
                       <Boton
                         key={g.id}
@@ -594,7 +615,7 @@ function Individuales({ ola, tabla, alCambiar }) {
                         cargando={procesando}
                         onClick={() => mover(g, a.clave)}
                       >
-                        A «{g.nombre}»
+                        «{g.nombre}»
                       </Boton>
                     ))}
                   </div>
@@ -608,24 +629,17 @@ function Individuales({ ola, tabla, alCambiar }) {
   );
 }
 
-/** Dos puntajes iguales por el último cupo: lo decide la comisión. */
-function Empates({ ola, alCambiar }) {
+/** Quiénes entraron por empate. Es informativo: todos ellos pasan. */
+function Empates({ ola }) {
   const [empates, setEmpates] = useState(null);
   const [error, setError] = useState('');
-  const [procesando, setProcesando] = useState(false);
-
-  const cargar = useCallback(async () => {
-    try {
-      const { data } = await api.get('/resultados/empates', { params: { ola } });
-      setEmpates(data);
-    } catch (e) {
-      setError(mensajeError(e, 'No se pudieron cargar los empates'));
-    }
-  }, [ola]);
 
   useEffect(() => {
-    cargar();
-  }, [cargar]);
+    api
+      .get('/resultados/empates', { params: { ola } })
+      .then(({ data }) => setEmpates(data))
+      .catch((e) => setError(mensajeError(e, 'No se pudieron cargar los empates')));
+  }, [ola]);
 
   if (error) {
     return (
@@ -636,18 +650,6 @@ function Empates({ ola, alCambiar }) {
   }
   if (!empates) return <Cargando texto="Buscando empates" />;
 
-  const decidir = async (clave, estado) => {
-    setProcesando(true);
-    try {
-      await api.post('/resultados/decidir', { clave, estado }, { params: { ola } });
-      await Promise.all([cargar(), alCambiar()]);
-    } catch (e) {
-      setError(mensajeError(e, 'No se pudo guardar la decisión'));
-    } finally {
-      setProcesando(false);
-    }
-  };
-
   const pozos = [...new Set(empates.map((e) => `${e.grupoId}|${e.categoria}`))];
 
   return (
@@ -655,15 +657,15 @@ function Empates({ ola, alCambiar }) {
       <Tarjeta>
         <h4 className="text-2xl font-black text-slate-900">Empates</h4>
         <p className="mt-2 text-xl text-slate-600">
-          Mismo puntaje por el último cupo. Elija quién pasa; a los demás márquelos como no
-          clasificados.
+          Mismo puntaje en el último cupo. <strong>Clasifican todos los empatados</strong>, aunque
+          la delegación pase de su cupo: desempatarlos exigiría un criterio que nadie acordó.
         </p>
       </Tarjeta>
 
       {empates.length === 0 ? (
         <Tarjeta>
           <Aviso tipo="exito" icono={CheckCircle2} compacto>
-            No hay empates por resolver.
+            No hubo empates en esta tanda.
           </Aviso>
         </Tarjeta>
       ) : (
@@ -695,25 +697,9 @@ function Empates({ ola, alCambiar }) {
                         DNI {a.dni} · puesto {a.puesto}
                       </p>
                     </div>
-                    <div className="flex flex-wrap gap-2">
-                      <Boton
-                        variante="exito"
-                        tamano="chico"
-                        cargando={procesando}
-                        onClick={() => decidir(a.clave, 'CLASIFICA')}
-                      >
-                        <Award className="h-5 w-5" />
-                        Que pase
-                      </Boton>
-                      <Boton
-                        variante="contorno"
-                        tamano="chico"
-                        cargando={procesando}
-                        onClick={() => decidir(a.clave, 'NO_CLASIFICA')}
-                      >
-                        No pasa
-                      </Boton>
-                    </div>
+                    <Etiqueta compacto className={COLOR[a.estado]}>
+                      {ETIQUETA[a.estado]}
+                    </Etiqueta>
                   </div>
                 ))}
               </div>
