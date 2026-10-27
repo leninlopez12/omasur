@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { AlertCircle, Award, Trophy } from 'lucide-react';
-import { Aviso, Cargando, Etiqueta, Tarjeta } from './Ui.jsx';
+import { Aviso, Boton, Cargando, Etiqueta, Tarjeta } from './Ui.jsx';
 import { api, mensajeError } from '../lib/api';
 
 /**
@@ -33,7 +33,7 @@ export default function MiClasificacion() {
   if (!datos.publicado) {
     return (
       <Tarjeta>
-        <h3 className="text-3xl font-black text-slate-900">Clasificación</h3>
+        <h3 className="text-3xl font-black text-slate-900">Clasificados</h3>
         <div className="mt-6">
           <Aviso tipo="info" icono={AlertCircle}>
             Los resultados de su delegación todavía no están publicados.
@@ -52,7 +52,7 @@ export default function MiClasificacion() {
               <Trophy className="h-8 w-8 text-granate-600" />
             </span>
             <div>
-              <h3 className="text-3xl font-black text-slate-900">Clasificación</h3>
+              <h3 className="text-3xl font-black text-slate-900">Clasificados</h3>
               <p className="mt-2 text-xl text-slate-600">{datos.institucion}</p>
             </div>
           </div>
@@ -126,6 +126,86 @@ export default function MiClasificacion() {
           </div>
         </Tarjeta>
       ))}
+    </div>
+  );
+}
+
+/**
+ * La ventana que recibe al tutor cuando se publican los resultados.
+ *
+ * Sale una vez por publicación: si la comisión vuelve a publicar —porque
+ * corrigió algo—, aparece de nuevo. Lo que no hace es insistir todos los días
+ * con lo mismo.
+ */
+export function AvisoClasificados({ publicado, publicadoEn, alIr }) {
+  const [cerrado, setCerrado] = useState(false);
+
+  // La fecha llega después de la primera pintada, así que la memoria se
+  // consulta en cada una: guardarla al montar la leería con la clave vacía.
+  if (!publicado || !publicadoEn || cerrado) return null;
+
+  const memoria = `omasur_clasificados_${publicadoEn}`;
+  let visto = false;
+  try {
+    visto = localStorage.getItem(memoria) === 'si';
+  } catch {
+    visto = false;
+  }
+  if (visto) return null;
+
+  const cerrar = () => {
+    setCerrado(true);
+    try {
+      localStorage.setItem(memoria, 'si');
+    } catch {
+      /* sin memoria vuelve a salir: no es grave */
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center overflow-y-auto p-4 sm:p-6">
+      <div className="absolute inset-0 bg-slate-900/70 backdrop-blur-sm" onClick={cerrar} />
+
+      <div className="animate-emerger relative my-auto w-full max-w-2xl overflow-hidden rounded-3xl bg-white shadow-[0_45px_90px_-25px_rgba(15,23,42,0.6)] ring-1 ring-emerald-200">
+        <div className="relative bg-[linear-gradient(145deg,#ECFDF5_0%,#A7F3D0_35%,#34D399_70%,#047857_100%)] px-6 py-9 text-center sm:px-10">
+          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_28%_0%,rgba(255,255,255,0.75),transparent_55%)]" />
+
+          <span className="relative mx-auto flex h-24 w-24 items-center justify-center rounded-3xl bg-white/80 shadow-[0_14px_28px_-12px_rgba(15,23,42,0.55)]">
+            <Trophy className="h-14 w-14 text-emerald-700" />
+          </span>
+
+          <h2 className="relative mt-6 text-balance text-2xl font-black leading-tight text-slate-900 sm:text-3xl">
+            Ya están los clasificados de su delegación
+          </h2>
+        </div>
+
+        <div className="px-6 py-7 text-center sm:px-10">
+          <p className="text-lg text-slate-700 sm:text-xl">
+            Revise quiénes pasaron a la etapa macrorregional y el puntaje de cada estudiante.
+          </p>
+
+          <div className="mt-8">
+            <Boton
+              variante="exito"
+              tamano="grande"
+              onClick={() => {
+                cerrar();
+                alIr();
+              }}
+            >
+              <Trophy className="h-7 w-7" />
+              Ver los clasificados
+            </Boton>
+          </div>
+
+          <button
+            onClick={cerrar}
+            className="mt-6 block w-full text-lg font-semibold text-slate-500 transition hover:text-slate-700"
+          >
+            Después
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

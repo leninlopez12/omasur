@@ -85,6 +85,45 @@ function useResultados(ola) {
   return { datos, setDatos, error, recargar };
 }
 
+/**
+ * Lo que falta resolver, con el camino para hacerlo.
+ *
+ * Avisar sin ofrecer la salida obliga a adivinar dónde se arregla; el botón
+ * lleva directo a la pantalla donde esos casos se deciden.
+ */
+function Pendientes({ cantidad, alResolver }) {
+  return (
+    <div className="rounded-2xl border-2 border-amber-200 bg-amber-50 p-6">
+      <div className="flex flex-wrap items-start justify-between gap-5">
+        <div className="flex gap-3">
+          <AlertCircle className="h-8 w-8 shrink-0 text-amber-700" />
+          <div className="text-amber-900">
+            <p className="text-xl font-bold">
+              {cantidad} {cantidad === 1 ? 'estudiante' : 'estudiantes'} sin resolver
+            </p>
+            <p className="mt-1 text-xl">
+              Son los únicos de su categoría en su delegación, así que no se les puede aplicar un
+              porcentaje. Júntelos con otra delegación o decida a mano si pasan. Mientras tanto no
+              cuentan como clasificados.
+            </p>
+            {!alResolver && (
+              <p className="mt-2 text-xl font-bold">
+                Se resuelven en «Llenadas por comisión», donde están los de las dos tandas.
+              </p>
+            )}
+          </div>
+        </div>
+
+        {alResolver && (
+          <Boton variante="contorno" onClick={alResolver}>
+            Ver y resolver
+          </Boton>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function Cifras({ resumen }) {
   const datos = [
     { valor: resumen.estudiantes, texto: 'Estudiantes con puntaje' },
@@ -134,6 +173,11 @@ export function ModuloResultados({ ola }) {
   // pestaña sobra y sería una pantalla vacía más que abrir.
   const pasos = PASOS[ola].filter((p) => p.id !== 'empates' || datos.resumen.empates > 0);
   const actual = pasos.some((p) => p.id === paso) ? paso : 'clasificacion';
+
+  // Los sueltos se resuelven en la tanda de la comisión, vengan de donde vengan.
+  const aResolver = pasos.some((p) => p.id === 'individuales')
+    ? () => setPaso('individuales')
+    : null;
 
   return (
     <div className="space-y-6">
@@ -188,13 +232,21 @@ export function ModuloResultados({ ola }) {
       ) : (
         <>
           {actual === 'clasificacion' && (
-            <Clasificacion ola={ola} datos={datos} recargar={recargar} />
+            <Clasificacion datos={datos} recargar={recargar} alResolver={aResolver} />
           )}
           {actual === 'individuales' && <Individuales alCambiar={recargar} />}
           {actual === 'empates' && <Empates ola={ola} />}
-          {actual === 'revisar' && <Revisar ola={ola} resumen={datos.resumen} />}
+          {actual === 'revisar' && (
+            <Revisar ola={ola} resumen={datos.resumen} alResolver={aResolver} />
+          )}
           {actual === 'publicar' && (
-            <Publicar ola={ola} resumen={datos.resumen} pendientes={pendientes} alCambiar={recargar} />
+            <Publicar
+              ola={ola}
+              resumen={datos.resumen}
+              pendientes={pendientes}
+              alCambiar={recargar}
+              alResolver={aResolver}
+            />
           )}
         </>
       )}
@@ -240,7 +292,7 @@ function Decision({ alumno, alDecidir, guardando }) {
  * todos y lo único que queda a criterio —los que quedaron solos— se resuelve
  * en su propia pantalla.
  */
-function Clasificacion({ ola, datos, recargar }) {
+function Clasificacion({ datos, recargar, alResolver }) {
   const [buscar, setBuscar] = useState('');
   const [filtro, setFiltro] = useState('');
 
@@ -261,13 +313,7 @@ function Clasificacion({ ola, datos, recargar }) {
       <Cifras resumen={datos.resumen} />
 
       {datos.resumen.pendientes > 0 && (
-        <Aviso
-          tipo="alerta"
-          icono={AlertCircle}
-          titulo={`${datos.resumen.pendientes} por resolver antes de publicar`}
-        >
-          Los empates y los que están solos en su categoría necesitan una decisión suya.
-        </Aviso>
+        <Pendientes cantidad={datos.resumen.pendientes} alResolver={alResolver} />
       )}
 
       <Filtros buscar={buscar} alBuscar={setBuscar} placeholder="Institución o tutor">
@@ -713,7 +759,7 @@ function Empates({ ola }) {
 }
 
 /** El consolidado de la tanda, antes de dar el visto bueno. */
-function Revisar({ ola, resumen }) {
+function Revisar({ ola, resumen, alResolver }) {
   const [bajando, setBajando] = useState('');
 
   const bajar = async (solo) => {
@@ -730,10 +776,7 @@ function Revisar({ ola, resumen }) {
       <Cifras resumen={resumen} />
 
       {resumen.pendientes > 0 ? (
-        <Aviso tipo="alerta" icono={AlertCircle} titulo={`Faltan ${resumen.pendientes} por resolver`}>
-          Resuelva los empates y los estudiantes en evaluación antes de publicar: hasta entonces no
-          cuentan como clasificados.
-        </Aviso>
+        <Pendientes cantidad={resumen.pendientes} alResolver={alResolver} />
       ) : (
         <Aviso tipo="exito" icono={CheckCircle2}>
           No queda nada pendiente: {resumen.clasifican} clasificados en {resumen.delegaciones}{' '}
@@ -780,7 +823,7 @@ function Revisar({ ola, resumen }) {
 }
 
 /** El interruptor de la tanda. */
-function Publicar({ ola, resumen, pendientes, alCambiar }) {
+function Publicar({ ola, resumen, pendientes, alCambiar, alResolver }) {
   const [aviso, setAviso] = useState('');
   const [procesando, setProcesando] = useState(false);
   const publicado = resumen.publicado[ola];
@@ -802,7 +845,11 @@ function Publicar({ ola, resumen, pendientes, alCambiar }) {
     try {
       await api.post('/resultados/publicar', { ola, publicado: valor });
       await alCambiar();
-      setAviso(valor ? 'Publicado: ya se ve en la portada.' : 'Retirado de la portada.');
+      setAviso(
+        valor
+          ? 'Publicado: los tutores de esta tanda ya lo ven en su cuenta.'
+          : 'Retirado: los tutores dejaron de verlo.',
+      );
     } catch (e) {
       setAviso(mensajeError(e, 'No se pudo cambiar la publicación'));
     } finally {
@@ -812,12 +859,7 @@ function Publicar({ ola, resumen, pendientes, alCambiar }) {
 
   return (
     <div className="space-y-6">
-      {pendientes > 0 && (
-        <Aviso tipo="alerta" icono={AlertCircle} titulo="Hay casos sin resolver">
-          {pendientes} estudiantes siguen en empate o en evaluación. Si publica ahora, no
-          aparecerán como clasificados.
-        </Aviso>
-      )}
+      {pendientes > 0 && <Pendientes cantidad={pendientes} alResolver={alResolver} />}
 
       {aviso && (
         <Aviso tipo="info" icono={CheckCircle2}>
@@ -849,11 +891,11 @@ function Publicar({ ola, resumen, pendientes, alCambiar }) {
         <div className="mt-6">
           <Aviso tipo={publicado ? 'exito' : 'info'} compacto>
             {publicado
-              ? `Publicado el ${new Date(cuando).toLocaleString('es-PE', {
+              ? `Visible para los tutores desde el ${new Date(cuando).toLocaleString('es-PE', {
                   dateStyle: 'long',
                   timeStyle: 'short',
                 })}`
-              : 'Todavía no se publica'}
+              : 'Todavía no lo ve ningún tutor'}
           </Aviso>
         </div>
 
@@ -863,7 +905,7 @@ function Publicar({ ola, resumen, pendientes, alCambiar }) {
             cargando={procesando}
             onClick={() => publicar(!publicado)}
           >
-            {publicado ? 'Retirar de la portada' : 'Publicar esta tanda'}
+            {publicado ? 'Ocultar a los tutores' : 'Publicar a los tutores'}
           </Boton>
         </div>
       </Tarjeta>
@@ -933,7 +975,11 @@ export function ResultadosGeneral() {
     try {
       const { data } = await api.post('/resultados/publicar/general', { publicado: valor });
       setDatos(data);
-      setAviso(valor ? 'Publicado todo en la portada.' : 'Retirado todo de la portada.');
+      setAviso(
+        valor
+          ? 'Publicado: todos los tutores ya ven sus resultados.'
+          : 'Retirado: ningún tutor ve resultados.',
+      );
     } catch (e) {
       setAviso(mensajeError(e, 'No se pudo publicar'));
     } finally {
@@ -946,8 +992,8 @@ export function ResultadosGeneral() {
       <Tarjeta>
         <h3 className="text-3xl font-black text-slate-900">General y publicación</h3>
         <p className="mt-2 text-xl text-slate-600">
-          Las dos tandas juntas. Revise el consolidado completo y publique todo cuando esté
-          conforme.
+          Las dos tandas juntas. Revise el consolidado completo y ábralas a los tutores cuando
+          esté conforme.
         </p>
       </Tarjeta>
 
@@ -1043,7 +1089,8 @@ export function ResultadosGeneral() {
       <Tarjeta>
         <h4 className="text-xl font-black text-slate-900">Publicación general</h4>
         <p className="mt-2 text-base text-slate-600">
-          Enciende o apaga las dos tandas a la vez. Es el paso final, cuando ya revisó todo.
+          Abre o cierra las dos tandas a la vez en las cuentas de los tutores. Es el paso final,
+          cuando ya revisó todo.
         </p>
 
         <div className="mt-6">
@@ -1052,7 +1099,7 @@ export function ResultadosGeneral() {
             cargando={procesando === 'publicar'}
             onClick={() => publicarTodo(!ambas)}
           >
-            {ambas ? 'Retirar todo de la portada' : 'Publicar los resultados generales'}
+            {ambas ? 'Ocultar todo a los tutores' : 'Publicar los resultados generales'}
           </Boton>
         </div>
       </Tarjeta>

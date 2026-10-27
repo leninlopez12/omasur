@@ -583,6 +583,7 @@ export class ResultadosService {
 
     return {
       publicado: true,
+      publicadoEn: config.publicadoEn[mios[0].ola],
       institucion: mios[0].institucion,
       categorias,
       resumen: {

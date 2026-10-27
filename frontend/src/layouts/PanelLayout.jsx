@@ -77,9 +77,12 @@ export default function PanelLayout({
                 className={`flex w-full items-center text-left font-semibold transition ${t.item} ${
                   activo
                     ? 'bg-white text-granate-700 shadow-suave'
-                    : destacado
-                      ? // Lo urgente no se pierde entre lo de siempre.
-                        'bg-amber-500 text-white hover:bg-amber-400'
+                    : destacado === 'verde'
+                      ? // Lo bueno también merece saltar a la vista.
+                        'bg-emerald-600 text-white hover:bg-emerald-500'
+                      : destacado
+                        ? // Lo urgente no se pierde entre lo de siempre.
+                          'bg-amber-500 text-white hover:bg-amber-400'
                       : 'text-granate-100 hover:bg-granate-700'
                 }`}
               >

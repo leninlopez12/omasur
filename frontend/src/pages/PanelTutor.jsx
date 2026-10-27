@@ -31,7 +31,7 @@ import GestorAlumnos from '../components/GestorAlumnos.jsx';
 import PasoPago, { Confirmado } from '../components/PasoPago.jsx';
 import MisInscripciones from '../components/MisInscripciones.jsx';
 import RespuestasExamen, { AvisoExamen } from '../components/RespuestasExamen.jsx';
-import MiClasificacion from '../components/MiClasificacion.jsx';
+import MiClasificacion, { AvisoClasificados } from '../components/MiClasificacion.jsx';
 import {
   Aviso,
   Boton,
@@ -57,7 +57,7 @@ import {
 
 const SECCIONES = [
   { id: 'examen', texto: 'Enviar respuestas del examen', icono: FileSpreadsheet },
-  { id: 'clasificacion', texto: 'Clasificación', icono: Trophy },
+  { id: 'clasificacion', texto: 'Clasificados', icono: Trophy },
   { id: 'resumen', texto: 'Resumen', icono: LayoutDashboard },
   { id: 'alumnos', texto: 'Estudiantes', icono: Users },
   { id: 'pago-quienes', texto: 'Seleccionar estudiantes', icono: UserCheck },
@@ -72,7 +72,7 @@ const SECCIONES_PIE = [{ id: 'datos', texto: 'Mis datos', icono: Settings }];
 
 const TITULOS = {
   examen: 'Respuestas del examen',
-  clasificacion: 'Clasificación de mi delegación',
+  clasificacion: 'Clasificados de mi delegación',
   resumen: 'Resumen de mi inscripción',
   alumnos: 'Mis estudiantes',
   'pago-quienes': 'Pago de la delegación',
@@ -96,7 +96,7 @@ function Contenido() {
   const [resumen, setResumen] = useState(null);
   const [examen, setExamen] = useState(null);
   // La clasificación aparece recién cuando la comisión publica su tanda.
-  const [clasificado, setClasificado] = useState(false);
+  const [clasificacion, setClasificacion] = useState(null);
 
   const cargar = useCallback(async () => {
     const { data } = await api.get('/tutores/resumen');
@@ -112,19 +112,25 @@ function Contenido() {
 
     api
       .get('/resultados/mi-clasificacion')
-      .then(({ data }) => setClasificado(Boolean(data.publicado)))
-      .catch(() => setClasificado(false));
+      .then(({ data }) => setClasificacion(data))
+      .catch(() => setClasificacion(null));
   }, [cargar]);
 
-  // El examen solo existe para las delegaciones aprobadas; al resto ni se les
-  // nombra. Y se resalta únicamente mientras haya algo que hacer: una vez
-  // enviadas las respuestas —o llenadas por la comisión— deja de ser urgente.
+  const clasificado = Boolean(clasificacion?.publicado);
+
+  // Cada sección se muestra solo cuando le toca, y se resalta solo mientras
+  // sea lo siguiente que hay que mirar: el examen en ámbar mientras falte
+  // enviarlo, y los clasificados en verde apenas salen.
   const secciones = SECCIONES.filter(
     (s) =>
       (s.id !== 'examen' || examen?.habilitado) && (s.id !== 'clasificacion' || clasificado),
-  ).map((s) =>
-    s.id === 'examen' ? { ...s, destacado: Boolean(examen?.abierto && !examen?.entrega) } : s,
-  );
+  ).map((s) => {
+    if (s.id === 'examen') {
+      return { ...s, destacado: Boolean(examen?.abierto && !examen?.entrega) && !clasificado };
+    }
+    if (s.id === 'clasificacion') return { ...s, destacado: 'verde' };
+    return s;
+  });
 
   return (
     <PanelLayout
@@ -138,9 +144,14 @@ function Contenido() {
       <AvisosEnVivo />
       <FranjaSuplantacion />
       <AvisoExamen
-        abierto={examen?.abierto}
+        abierto={examen?.abierto && !clasificado}
         yaEnvio={Boolean(examen?.entrega)}
         alIr={() => setSeccion('examen')}
+      />
+      <AvisoClasificados
+        publicado={clasificado}
+        publicadoEn={clasificacion?.publicadoEn}
+        alIr={() => setSeccion('clasificacion')}
       />
 
       {!resumen ? (
