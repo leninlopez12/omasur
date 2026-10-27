@@ -17,7 +17,6 @@ import { useAjustes } from '../lib/ajustes';
 import IconoWhatsApp from '../components/IconoWhatsApp.jsx';
 import BotonWhatsApp from '../components/BotonWhatsApp.jsx';
 import Comunicado from '../components/Comunicado.jsx';
-import ResultadosPublicos from '../components/ResultadosPublicos.jsx';
 
 const ETAPAS = [
   {
@@ -159,8 +158,6 @@ export default function Landing() {
           Inscripciones hasta el lunes 19 de octubre de 2026
         </p>
       </div>
-
-      <ResultadosPublicos />
 
       {/* 2. QUIÉNES PARTICIPAN */}
       {/* z-10 y sin overflow: la imagen 3D se desborda sobre la sección de abajo. */}

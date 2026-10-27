@@ -8,6 +8,14 @@ import { GRANATE, escribirEncabezados, escribirTitulo, nombreArchivo } from '../
 
 const CLAVE = 'resultados_config';
 
+/** Para buscar sin que estorben los acentos ni las mayúsculas. */
+const sinTildes = (texto: string) =>
+  String(texto || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .trim();
+
 /**
  * Las dos tandas, que se trabajan por separado.
  *
@@ -30,20 +38,13 @@ export interface ConfigResultados {
   porcentaje: number;
   manual: Record<string, 'CLASIFICA' | 'NO_CLASIFICA'>;
   agrupaciones: Agrupacion[];
+  /** Publicar abre los resultados a los tutores, cada uno en su cuenta. */
   publicado: Record<Ola, boolean>;
   publicadoEn: Record<Ola, string | null>;
-  /** Lo único que se lee en la portada sobre los resultados. */
-  tituloPublico: string;
-  /** Cómo se ordena la lista pública. */
-  agrupadoPor: 'categoria' | 'delegacion';
-  /** La consulta por DNI se enciende aparte de la lista. */
-  consultaActiva: boolean;
   /** Qué supervisores pueden entrar a esta sección. El admin siempre puede. */
   encargados: string[];
   actualizado: string;
 }
-
-const TITULO_POR_DEFECTO = 'RESULTADOS PRIMERA ETAPA INSTITUCIONAL';
 
 const VACIA: ConfigResultados = {
   porcentaje: 30,
@@ -51,9 +52,6 @@ const VACIA: ConfigResultados = {
   agrupaciones: [],
   publicado: { tutores: false, comision: false },
   publicadoEn: { tutores: null, comision: null },
-  tituloPublico: TITULO_POR_DEFECTO,
-  agrupadoPor: 'categoria',
-  consultaActiva: false,
   encargados: [],
   actualizado: '',
 };
@@ -142,24 +140,6 @@ export class ResultadosService {
       create: { clave: CLAVE, valor: JSON.stringify(config) },
       update: { valor: JSON.stringify(config) },
     });
-    return config;
-  }
-
-  /** Título, forma de la lista y si la consulta por DNI está encendida. */
-  async guardarAjustes(datos: Partial<ConfigResultados>) {
-    const config = await this.config();
-
-    if (datos.tituloPublico !== undefined) {
-      config.tituloPublico = String(datos.tituloPublico).trim().slice(0, 120) || TITULO_POR_DEFECTO;
-    }
-    if (datos.agrupadoPor === 'categoria' || datos.agrupadoPor === 'delegacion') {
-      config.agrupadoPor = datos.agrupadoPor;
-    }
-    if (datos.consultaActiva !== undefined) {
-      config.consultaActiva = Boolean(datos.consultaActiva);
-    }
-
-    await this.guardar(config);
     return config;
   }
 
@@ -365,9 +345,6 @@ export class ResultadosService {
       publicado: config.publicado,
       publicadoEn: config.publicadoEn,
       porcentaje: config.porcentaje,
-      tituloPublico: config.tituloPublico,
-      agrupadoPor: config.agrupadoPor,
-      consultaActiva: config.consultaActiva,
     };
   }
 
@@ -572,83 +549,161 @@ export class ResultadosService {
     return this.general();
   }
 
-  /** Lo que ve cualquiera en la portada: solo lo publicado y solo quien pasó. */
-  async publicos() {
-    const { resultados, config } = await this.calcularTodo();
-    const visibles = resultados.filter((r) => r.estado === 'CLASIFICA' && config.publicado[r.ola]);
+  /**
+   * Lo que ve un tutor en su cuenta.
+   *
+   * Sus propios estudiantes, publicados o no según la tanda en que hayan
+   * competido: a uno que se agrupó con otra delegación le toca la tanda de
+   * esa, y por eso se mira pozo por pozo y no la del tutor.
+   */
+  async miClasificacion(tutorId: string) {
+    const { resultados, config } = await this.calcular();
+    const mios = resultados.filter((r) => r.tutorId === tutorId && config.publicado[r.ola]);
 
-    const porCategoria = config.agrupadoPor === 'categoria';
-    const llaves = [
-      ...new Set(visibles.map((r) => (porCategoria ? r.categoria : r.grupoNombre))),
-    ].sort((a, b) => a.localeCompare(b, 'es'));
+    if (mios.length === 0) return { publicado: false, categorias: [], resumen: null };
 
-    const bloques = llaves.map((llave) => {
-      const suyos = visibles.filter(
-        (r) => (porCategoria ? r.categoria : r.grupoNombre) === llave,
-      );
-
-      return {
-        llave,
-        titulo: porCategoria ? `CAT. ${llave}` : llave,
-        detalle: porCategoria
-          ? GRADOS.find((g) => g.categoria === llave)?.label || ''
-          : `${suyos.length} ${suyos.length === 1 ? 'clasificado' : 'clasificados'}`,
-        alumnos: suyos
-          .sort(
-            (a, b) =>
-              (porCategoria
-                ? a.grupoNombre.localeCompare(b.grupoNombre, 'es')
-                : a.categoria.localeCompare(b.categoria)) ||
-              b.puntaje - a.puntaje ||
-              a.nombres.localeCompare(b.nombres, 'es'),
-          )
-          .map((r) => ({
-            nombres: r.nombres,
-            // Al agrupar por delegación lo que distingue es la categoría.
-            detalle: porCategoria ? r.grupoNombre : `CAT. ${r.categoria}`,
-          })),
-      };
-    });
+    const categorias = [...new Set(mios.map((r) => r.categoria))].sort().map((categoria) => ({
+      categoria,
+      grado: GRADOS.find((g) => g.categoria === categoria)?.label || '',
+      alumnos: mios
+        .filter((r) => r.categoria === categoria)
+        .sort((a, b) => b.puntaje - a.puntaje || a.nombres.localeCompare(b.nombres, 'es'))
+        .map((r) => ({
+          nombres: r.nombres,
+          dni: r.dni,
+          puntaje: r.puntaje,
+          puesto: r.puesto,
+          clasifica: r.estado === 'CLASIFICA',
+          enEvaluacion: r.estado === 'EN_EVALUACION',
+          empatado: r.empatado,
+          // Si compitió en otro pozo, hay que decirlo: su puesto es de ahí.
+          compitioEn: r.grupoNombre !== r.institucion ? r.grupoNombre : null,
+        })),
+    }));
 
     return {
-      hayAlgo: visibles.length > 0,
-      titulo: config.tituloPublico,
-      agrupadoPor: config.agrupadoPor,
-      consultaActiva: config.consultaActiva,
-      bloques,
+      publicado: true,
+      institucion: mios[0].institucion,
+      categorias,
+      resumen: {
+        estudiantes: mios.length,
+        clasifican: mios.filter((r) => r.estado === 'CLASIFICA').length,
+      },
     };
   }
 
-  /** La consulta por DNI de la portada, que se enciende aparte. */
-  async consultar(dni: string) {
-    const config = await this.config();
-    if (!config.consultaActiva) {
-      throw new NotFoundException('La consulta de puntajes todavía no está habilitada.');
+  /**
+   * La búsqueda de la comisión.
+   *
+   * Es para atender a quien no puede entrar a su cuenta: se busca por
+   * institución, tutor, nombre o DNI y se baja lo de esa delegación.
+   */
+  async buscar(texto: string) {
+    const termino = sinTildes(texto);
+    if (termino.length < 2) {
+      throw new BadRequestException('Escriba al menos dos letras o el DNI');
     }
 
-    const limpio = String(dni || '').trim();
-    if (!/^\d{6,12}$/.test(limpio)) {
-      throw new BadRequestException('Escriba un DNI válido');
-    }
+    const { resultados, config } = await this.calcular();
+    const publicados = resultados.filter((r) => config.publicado[r.ola]);
 
-    const { resultados } = await this.calcularTodo();
-    const suyos = resultados.filter((r) => r.dni === limpio && config.publicado[r.ola]);
+    const coincide = (r: Resultado) =>
+      sinTildes(`${r.institucion} ${r.tutor} ${r.nombres} ${r.dni}`).includes(termino);
+
+    const tutores = [...new Set(publicados.filter(coincide).map((r) => r.tutorId))];
+
+    return tutores
+      .map((tutorId) => {
+        const suyos = publicados.filter((r) => r.tutorId === tutorId);
+        const primero = suyos[0];
+
+        return {
+          tutorId,
+          institucion: primero.institucion,
+          tutor: primero.tutor,
+          celular: primero.celular,
+          estudiantes: suyos.length,
+          clasifican: suyos.filter((r) => r.estado === 'CLASIFICA').length,
+          alumnos: suyos
+            .sort(
+              (a, b) =>
+                a.categoria.localeCompare(b.categoria) ||
+                b.puntaje - a.puntaje ||
+                a.nombres.localeCompare(b.nombres, 'es'),
+            )
+            .map((r) => ({
+              nombres: r.nombres,
+              dni: r.dni,
+              categoria: r.categoria,
+              puntaje: r.puntaje,
+              puesto: r.puesto,
+              clasifica: r.estado === 'CLASIFICA',
+              empatado: r.empatado,
+            })),
+        };
+      })
+      .sort((a, b) => a.institucion.localeCompare(b.institucion, 'es'));
+  }
+
+  /** El Excel de una sola delegación, para mandárselo a su tutor. */
+  async excelDelegacion(tutorId: string): Promise<{ buffer: Buffer; nombre: string }> {
+    const { resultados, config } = await this.calcular();
+    const suyos = resultados.filter((r) => r.tutorId === tutorId && config.publicado[r.ola]);
 
     if (suyos.length === 0) {
-      throw new NotFoundException(
-        'Todavía no hay resultados publicados para ese DNI. Vuelva a intentarlo más tarde.',
-      );
+      throw new NotFoundException('Esa delegación todavía no tiene resultados publicados');
     }
 
-    return suyos.map((r) => ({
-      nombres: r.nombres,
-      institucion: r.grupoNombre,
-      categoria: r.categoria,
-      grado: GRADOS.find((g) => g.categoria === r.categoria)?.label || '',
-      puntaje: r.puntaje,
-      puesto: r.puesto,
-      clasifica: r.estado === 'CLASIFICA',
-    }));
+    const libro = new ExcelJS.Workbook();
+    libro.creator = 'I OMASUR UNI 2026';
+    const hoja = libro.addWorksheet('Clasificación');
+
+    const columnas = [
+      { header: 'N°', width: 6 },
+      { header: 'CATEGORÍA', width: 12 },
+      { header: 'DNI', width: 14 },
+      { header: 'APELLIDOS Y NOMBRES', width: 38 },
+      { header: 'PUESTO', width: 10 },
+      { header: 'PUNTAJE', width: 12 },
+      { header: 'RESULTADO', width: 18 },
+    ];
+
+    const primero = suyos[0];
+    escribirTitulo(
+      hoja,
+      columnas.length,
+      primero.institucion,
+      `Etapa institucional · ${primero.tutor} · clasifica el ${config.porcentaje}% de cada categoría`,
+      suyos.length,
+    );
+    escribirEncabezados(hoja, columnas);
+
+    suyos
+      .sort(
+        (a, b) =>
+          a.categoria.localeCompare(b.categoria) ||
+          b.puntaje - a.puntaje ||
+          a.nombres.localeCompare(b.nombres, 'es'),
+      )
+      .forEach((r, i) => {
+        const fila = hoja.addRow([
+          i + 1,
+          `CAT. ${r.categoria}`,
+          r.dni,
+          r.nombres,
+          r.puesto,
+          r.puntaje,
+          ETIQUETAS[r.estado] + (r.empatado ? ' (empate)' : ''),
+        ]);
+        fila.getCell(3).numFmt = '@';
+        fila.getCell(6).font = { bold: true, color: { argb: GRANATE } };
+        fila.getCell(7).font = { bold: true, color: { argb: COLOR_ESTADO[r.estado] } };
+      });
+
+    return {
+      buffer: (await libro.xlsx.writeBuffer()) as unknown as Buffer,
+      nombre: nombreArchivo(`clasificacion-${primero.institucion}`),
+    };
   }
 
   // -------------------------------------------------------------------- Excel

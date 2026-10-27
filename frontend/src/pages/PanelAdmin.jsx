@@ -91,7 +91,7 @@ import {
   ExamenEnviadas,
 } from '../components/ExamenEntregas.jsx';
 import {
-  AjustesPublicacion,
+  ConsultarResultados,
   EncargadosResultados,
   ModuloResultados,
   ResultadosGeneral,
@@ -107,7 +107,7 @@ const SECCIONES = [
       { id: 'resultados-tutores', texto: 'Enviadas por tutores', icono: UserCheck },
       { id: 'resultados-comision', texto: 'Llenadas por comisión', icono: Users },
       { id: 'resultados-general', texto: 'General y publicación', icono: Award },
-      { id: 'resultados-publicacion', texto: 'Cómo se publica', icono: Megaphone },
+      { id: 'resultados-consultar', texto: 'Consultar y descargar', icono: Search },
       { id: 'resultados-encargados', texto: 'Supervisor a cargo', icono: UserCog },
     ],
   },
@@ -178,7 +178,7 @@ const TITULOS = {
   'resultados-tutores': 'Resultados · Enviadas por los tutores',
   'resultados-comision': 'Resultados · Llenadas por la comisión',
   'resultados-general': 'Resultados · General y publicación',
-  'resultados-publicacion': 'Resultados · Cómo se publica',
+  'resultados-consultar': 'Resultados · Consultar y descargar',
   'resultados-encargados': 'Resultados · Supervisor a cargo',
   'examen-respuestas': 'Examen · Respuestas correctas',
   'examen-puntaje': 'Examen · Puntaje',
@@ -259,7 +259,7 @@ function Contenido() {
       {seccion === 'resultados-tutores' && <ModuloResultados ola="tutores" />}
       {seccion === 'resultados-comision' && <ModuloResultados ola="comision" />}
       {seccion === 'resultados-general' && <ResultadosGeneral />}
-      {seccion === 'resultados-publicacion' && <AjustesPublicacion />}
+      {seccion === 'resultados-consultar' && <ConsultarResultados />}
       {seccion === 'resultados-encargados' && <EncargadosResultados />}
 
       {seccion === 'examen-respuestas' && <ExamenRespuestas />}

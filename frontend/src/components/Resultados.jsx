@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { Aviso, Boton, Campo, Cargando, Etiqueta, Selector, Tarjeta } from './Ui.jsx';
 import { Filtros, sinTildes } from './ExamenEntregas.jsx';
+import { Search } from 'lucide-react';
 import { api, descargar, mensajeError } from '../lib/api';
 
 const ETIQUETA = {
@@ -1188,168 +1189,156 @@ export function EncargadosResultados() {
 }
 
 /**
- * Resultados · Cómo se publica.
+ * Resultados · Consultar y descargar.
  *
- * El título que se lee en la portada, si la lista se ordena por categoría o
- * por delegación, y si la consulta por DNI está encendida. La consulta va
- * aparte a propósito: se puede mostrar la lista sin abrir los puntajes.
+ * Para atender a quien no puede entrar a su cuenta: se busca por institución,
+ * tutor, nombre o DNI y se baja la clasificación de esa delegación para
+ * mandársela. Solo aparece lo que ya está publicado.
  */
-export function AjustesPublicacion() {
-  const [config, setConfig] = useState(null);
+export function ConsultarResultados() {
+  const [texto, setTexto] = useState('');
+  const [encontrado, setEncontrado] = useState(null);
   const [error, setError] = useState('');
-  const [mensaje, setMensaje] = useState('');
-  const [guardando, setGuardando] = useState(false);
+  const [buscando, setBuscando] = useState(false);
+  const [bajando, setBajando] = useState('');
 
-  useEffect(() => {
-    api
-      .get('/resultados/publicos')
-      .then(({ data }) =>
-        setConfig({
-          tituloPublico: data.titulo,
-          agrupadoPor: data.agrupadoPor,
-          consultaActiva: data.consultaActiva,
-        }),
-      )
-      .catch((e) => setError(mensajeError(e, 'No se pudo cargar la configuración')));
-  }, []);
-
-  if (error && !config) {
-    return (
-      <Aviso tipo="error" icono={AlertCircle}>
-        {error}
-      </Aviso>
-    );
-  }
-  if (!config) return <Cargando texto="Cargando la configuración" />;
-
-  const guardar = async (cambios, texto) => {
+  const buscar = async (evento) => {
+    evento.preventDefault();
     setError('');
-    setMensaje('');
-    setGuardando(true);
+    setEncontrado(null);
+
+    if (texto.trim().length < 2) {
+      return setError('Escriba al menos dos letras, o el DNI del estudiante.');
+    }
+
+    setBuscando(true);
     try {
-      const { data } = await api.post('/resultados/ajustes', cambios);
-      setConfig({
-        tituloPublico: data.tituloPublico,
-        agrupadoPor: data.agrupadoPor,
-        consultaActiva: data.consultaActiva,
-      });
-      setMensaje(texto);
+      const { data } = await api.get('/resultados/buscar', { params: { q: texto.trim() } });
+      setEncontrado(data);
     } catch (e) {
-      setError(mensajeError(e, 'No se pudo guardar'));
+      setError(mensajeError(e, 'No se pudo buscar'));
     } finally {
-      setGuardando(false);
+      setBuscando(false);
+    }
+  };
+
+  const bajar = async (d) => {
+    setBajando(d.tutorId);
+    try {
+      await descargar(`/resultados/delegacion/${d.tutorId}/excel`);
+    } finally {
+      setBajando('');
     }
   };
 
   return (
     <div className="space-y-6">
       <Tarjeta>
-        <h3 className="text-3xl font-black text-slate-900">Cómo se publica</h3>
+        <h3 className="text-3xl font-black text-slate-900">Consultar y descargar</h3>
         <p className="mt-2 text-xl text-slate-600">
-          Lo que se lee en la portada y la forma en que se ordena la lista.
-        </p>
-      </Tarjeta>
-
-      {error && (
-        <Aviso tipo="error" icono={AlertCircle}>
-          {error}
-        </Aviso>
-      )}
-      {mensaje && (
-        <Aviso tipo="exito" icono={CheckCircle2}>
-          {mensaje}
-        </Aviso>
-      )}
-
-      <Tarjeta>
-        <h4 className="text-xl font-black text-slate-900">Título de la portada</h4>
-        <p className="mt-2 text-base text-slate-600">
-          Es lo único que se lee encima de la lista. Puede incluir la fecha.
+          Para los tutores que no pueden entrar a su cuenta. Busque por institución, tutor, nombre
+          o DNI y descargue la clasificación de esa delegación.
         </p>
 
-        <div className="mt-6 max-w-2xl">
-          <Campo
-            etiqueta="Título"
-            value={config.tituloPublico}
-            onChange={(e) => setConfig({ ...config, tituloPublico: e.target.value })}
-            placeholder="RESULTADOS PRIMERA ETAPA INSTITUCIONAL 22 DE OCTUBRE"
-          />
-        </div>
-
-        <div className="mt-6">
-          <Boton
-            cargando={guardando}
-            onClick={() => guardar({ tituloPublico: config.tituloPublico }, 'Título guardado')}
-          >
-            Guardar título
-          </Boton>
-        </div>
-      </Tarjeta>
-
-      <Tarjeta>
-        <h4 className="text-xl font-black text-slate-900">Cómo se agrupa la lista</h4>
-        <div className="mt-6 grid gap-4 sm:grid-cols-2">
-          {[
-            {
-              valor: 'categoria',
-              titulo: 'Por categoría',
-              detalle: 'Un bloque por CAT. A, B, C… y dentro el nombre y su institución.',
-            },
-            {
-              valor: 'delegacion',
-              titulo: 'Por delegación',
-              detalle: 'Un bloque por institución y dentro sus clasificados con su categoría.',
-            },
-          ].map((o) => (
-            <button
-              key={o.valor}
-              type="button"
-              disabled={guardando}
-              onClick={() => guardar({ agrupadoPor: o.valor }, `Se publicará ${o.titulo.toLowerCase()}`)}
-              className={`rounded-2xl border-2 p-5 text-left transition disabled:opacity-50 ${
-                config.agrupadoPor === o.valor
-                  ? 'border-granate-600 bg-granate-50'
-                  : 'border-slate-200 hover:border-granate-300'
-              }`}
-            >
-              <p className="text-xl font-black text-slate-900">{o.titulo}</p>
-              <p className="mt-2 text-base text-slate-600">{o.detalle}</p>
-            </button>
-          ))}
-        </div>
-      </Tarjeta>
-
-      <Tarjeta>
-        <div className="flex flex-wrap items-start justify-between gap-5">
-          <div>
-            <h4 className="text-xl font-black text-slate-900">Consulta de puntaje por DNI</h4>
-            <p className="mt-2 text-base text-slate-600">
-              Va aparte de la lista: puede publicar los clasificados sin abrir todavía los
-              puntajes de cada estudiante.
-            </p>
+        <form onSubmit={buscar} className="mt-8 flex flex-wrap items-end gap-3">
+          <div className="min-w-[18rem] flex-1">
+            <Campo
+              etiqueta="Buscar"
+              icono={Search}
+              placeholder="Institución, tutor, nombre o DNI"
+              value={texto}
+              onChange={(e) => setTexto(e.target.value)}
+            />
           </div>
-          <Boton
-            variante={config.consultaActiva ? 'peligro' : 'exito'}
-            cargando={guardando}
-            onClick={() =>
-              guardar(
-                { consultaActiva: !config.consultaActiva },
-                config.consultaActiva ? 'Consulta cerrada' : 'Consulta habilitada',
-              )
-            }
-          >
-            {config.consultaActiva ? 'Cerrar la consulta' : 'Habilitar la consulta'}
+          <Boton type="submit" cargando={buscando}>
+            Buscar
           </Boton>
-        </div>
+        </form>
 
-        <div className="mt-6">
-          <Aviso tipo={config.consultaActiva ? 'exito' : 'info'} compacto>
-            {config.consultaActiva
-              ? 'Cualquiera puede consultar su puntaje con su DNI.'
-              : 'La consulta no aparece en la portada.'}
-          </Aviso>
-        </div>
+        {error && (
+          <div className="mt-6">
+            <Aviso tipo="info" icono={AlertCircle} compacto>
+              {error}
+            </Aviso>
+          </div>
+        )}
       </Tarjeta>
+
+      {encontrado && encontrado.length === 0 && (
+        <Tarjeta>
+          <Aviso tipo="info" icono={AlertCircle} compacto>
+            Nada publicado que coincida con «{texto}».
+          </Aviso>
+        </Tarjeta>
+      )}
+
+      {encontrado?.map((d) => (
+        <Tarjeta key={d.tutorId}>
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <h4 className="text-2xl font-black text-slate-900">{d.institucion}</h4>
+              <p className="mt-1 text-base text-slate-600">
+                {d.tutor}
+                {d.celular && ` · ${d.celular}`}
+              </p>
+              <p className="mt-1 text-base text-slate-600">
+                {d.clasifican} de {d.estudiantes}{' '}
+                {d.clasifican === 1 ? 'clasificado' : 'clasificados'}
+              </p>
+            </div>
+            <Boton variante="excel" cargando={bajando === d.tutorId} onClick={() => bajar(d)}>
+              <Download className="h-6 w-6" />
+              Descargar
+            </Boton>
+          </div>
+
+          <div className="mt-6 overflow-x-auto rounded-2xl border-2 border-slate-200">
+            <table className="w-full min-w-[36rem] text-left">
+              <thead className="bg-slate-50">
+                <tr className="text-base text-slate-500">
+                  <th className="px-4 py-3 text-center font-semibold">Cat.</th>
+                  <th className="px-4 py-3 font-semibold">Estudiante</th>
+                  <th className="px-4 py-3 text-center font-semibold">Puesto</th>
+                  <th className="px-4 py-3 text-center font-semibold">Puntaje</th>
+                  <th className="px-4 py-3 font-semibold">Resultado</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {d.alumnos.map((a) => (
+                  <tr key={a.dni} className={a.clasifica ? 'bg-emerald-50/50' : ''}>
+                    <td className="px-4 py-3 text-center text-base font-black text-granate-700">
+                      {a.categoria}
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className="block text-base font-bold text-slate-900">{a.nombres}</span>
+                      <span className="block text-base text-slate-500">{a.dni}</span>
+                    </td>
+                    <td className="px-4 py-3 text-center text-base">{a.puesto}</td>
+                    <td className="px-4 py-3 text-center text-xl font-black text-granate-700">
+                      {a.puntaje}
+                    </td>
+                    <td className="px-4 py-3">
+                      <Etiqueta
+                        compacto
+                        className={
+                          a.clasifica
+                            ? 'bg-emerald-100 text-emerald-800'
+                            : 'bg-slate-100 text-slate-600'
+                        }
+                      >
+                        {a.clasifica ? 'Clasificó' : 'No clasificó'}
+                      </Etiqueta>
+                      {a.empatado && (
+                        <span className="mt-1 block text-base text-amber-700">por empate</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Tarjeta>
+      ))}
     </div>
   );
 }

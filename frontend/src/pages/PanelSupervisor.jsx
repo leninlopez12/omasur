@@ -6,7 +6,6 @@ import {
   FlaskConical,
   Inbox,
   ListChecks,
-  Megaphone,
   Search,
   Trophy,
   Upload,
@@ -25,7 +24,7 @@ import {
 import Campanita from '../components/Campanita.jsx';
 import AvisosEnVivo from '../components/AvisosEnVivo.jsx';
 import {
-  AjustesPublicacion,
+  ConsultarResultados,
   ModuloResultados,
   ResultadosGeneral,
 } from '../components/Resultados.jsx';
@@ -58,7 +57,7 @@ const SECCION_RESULTADOS = {
     { id: 'res-tutores', texto: 'Enviadas por tutores', icono: UserCheck },
     { id: 'res-comision', texto: 'Llenadas por comisión', icono: Users },
     { id: 'res-general', texto: 'General y publicación', icono: Award },
-    { id: 'res-publicacion', texto: 'Cómo se publica', icono: Megaphone },
+    { id: 'res-consultar', texto: 'Consultar y descargar', icono: Search },
   ],
 };
 
@@ -73,7 +72,7 @@ const TITULOS = {
   'res-tutores': 'Resultados · Enviadas por los tutores',
   'res-comision': 'Resultados · Llenadas por la comisión',
   'res-general': 'Resultados · General y publicación',
-  'res-publicacion': 'Resultados · Cómo se publica',
+  'res-consultar': 'Resultados · Consultar y descargar',
 };
 
 export default function PanelSupervisor() {
@@ -119,7 +118,7 @@ function Contenido() {
           {seccion === 'res-tutores' && <ModuloResultados ola="tutores" />}
           {seccion === 'res-comision' && <ModuloResultados ola="comision" />}
           {seccion === 'res-general' && <ResultadosGeneral />}
-          {seccion === 'res-publicacion' && <AjustesPublicacion />}
+          {seccion === 'res-consultar' && <ConsultarResultados />}
         </>
       )}
       {seccion === 'enviadas' && <ExamenEnviadas />}

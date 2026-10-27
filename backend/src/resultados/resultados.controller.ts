@@ -11,7 +11,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import type { Response } from 'express';
-import { ConfigResultados, Ola, ResultadosService } from './resultados.service';
+import { Ola, ResultadosService } from './resultados.service';
 import { EncargadoGuard } from './encargado.guard';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
@@ -26,16 +26,14 @@ function tanda(valor?: string): Ola | undefined {
 export class ResultadosController {
   constructor(private resultados: ResultadosService) {}
 
-  // ------------------------------------------------------------------ público
+  // --------------------------------------------------------------------- tutor
 
-  @Get('publicos')
-  publicos() {
-    return this.resultados.publicos();
-  }
-
-  @Get('consulta')
-  consulta(@Query('dni') dni: string) {
-    return this.resultados.consultar(dni);
+  /** Lo que ve el tutor en su cuenta: sus estudiantes y sus puntajes. */
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('TUTOR')
+  @Get('mi-clasificacion')
+  miClasificacion(@CurrentUser() user: JwtUser) {
+    return this.resultados.miClasificacion(user.sub);
   }
 
   // ------------------------------------------------------- quién está a cargo
@@ -142,11 +140,21 @@ export class ResultadosController {
     return this.resultados.publicarGeneral(Boolean(body?.publicado));
   }
 
-  /** Título de la portada, forma de la lista y consulta por DNI. */
+  // ------------------------------------------------------------ consultar
+
+  /** Buscar por institución, tutor, nombre o DNI. */
   @UseGuards(JwtAuthGuard, EncargadoGuard)
-  @Post('ajustes')
-  ajustes(@Body() body: Partial<ConfigResultados>) {
-    return this.resultados.guardarAjustes(body || {});
+  @Get('buscar')
+  buscar(@Query('q') q: string) {
+    return this.resultados.buscar(q);
+  }
+
+  /** El Excel de una delegación, para mandárselo a su tutor. */
+  @UseGuards(JwtAuthGuard, EncargadoGuard)
+  @Get('delegacion/:tutorId/excel')
+  async excelDelegacion(@Param('tutorId') tutorId: string, @Res() res: Response) {
+    const { buffer, nombre } = await this.resultados.excelDelegacion(tutorId);
+    this.enviarExcel(res, buffer, nombre);
   }
 
   // -------------------------------------------------------------------- Excel
@@ -155,7 +163,10 @@ export class ResultadosController {
   @Get('excel')
   async excel(@Query('solo') solo: string, @Query('ola') ola: string, @Res() res: Response) {
     const { buffer, nombre } = await this.resultados.excel(solo === 'clasificados', tanda(ola));
+    this.enviarExcel(res, buffer, nombre);
+  }
 
+  private enviarExcel(res: Response, buffer: Buffer, nombre: string) {
     res.setHeader(
       'Content-Type',
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
