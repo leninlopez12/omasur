@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { AlertCircle, Download, IdCard, Search, Users } from 'lucide-react';
+import { AlertCircle, Download, Eye, EyeOff, IdCard, Search, Users } from 'lucide-react';
 import { Aviso, Boton, Cargando, Selector, Tarjeta } from './Ui.jsx';
 import { api, descargar, mensajeError } from '../lib/api';
 
@@ -28,6 +28,8 @@ export default function CredencialesComision({ modo = 'delegaciones' }) {
   const [buscar, setBuscar] = useState('');
   const [bajando, setBajando] = useState('');
   const [error, setError] = useState('');
+  const [publica, setPublica] = useState(null);
+  const [cambiando, setCambiando] = useState(false);
 
   const cargar = useCallback(async () => {
     try {
@@ -37,6 +39,10 @@ export default function CredencialesComision({ modo = 'delegaciones' }) {
       ]);
       setFilas(lista.data);
       setEtapas(publicadas.data);
+      if (deAlumnos) {
+        const { data } = await api.get('/credenciales/publica');
+        setPublica(data.activa);
+      }
       if (publicadas.data.length) setEtapa(publicadas.data[publicadas.data.length - 1].clave);
     } catch (e) {
       setError(mensajeError(e, 'No se pudieron cargar las delegaciones'));
@@ -87,8 +93,64 @@ export default function CredencialesComision({ modo = 'delegaciones' }) {
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-|-$/g, '')}.pdf`;
 
+  const cambiarPublica = async (activa) => {
+    setError('');
+    setCambiando(true);
+    try {
+      const { data } = await api.post('/credenciales/publica', { activa });
+      setPublica(data.activa);
+    } catch (e) {
+      setError(mensajeError(e, 'No se pudo cambiar la credencial pública'));
+    } finally {
+      setCambiando(false);
+    }
+  };
+
   return (
     <div className="space-y-8">
+      {deAlumnos && publica !== null && (
+        <Tarjeta>
+          <div className="flex flex-wrap items-start justify-between gap-5">
+            <div className="flex items-start gap-4">
+              <span
+                className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl ${
+                  publica ? 'bg-emerald-50' : 'bg-slate-100'
+                }`}
+              >
+                {publica ? (
+                  <Eye className="h-7 w-7 text-emerald-700" />
+                ) : (
+                  <EyeOff className="h-7 w-7 text-slate-500" />
+                )}
+              </span>
+              <div>
+                <h3 className="text-2xl font-black text-slate-900">Credencial en la portada</h3>
+                <p className="mt-1 text-base text-slate-600">
+                  Abre el botón «Mi credencial» de la portada. La baja únicamente quien clasificó
+                  a la siguiente etapa; al resto se le avisa que no clasificó.
+                </p>
+              </div>
+            </div>
+
+            <Boton
+              variante={publica ? 'peligro' : 'exito'}
+              cargando={cambiando}
+              onClick={() => cambiarPublica(!publica)}
+            >
+              {publica ? 'Cerrar la credencial' : 'Abrir la credencial'}
+            </Boton>
+          </div>
+
+          <div className="mt-6">
+            <Aviso tipo={publica ? 'exito' : 'info'} compacto>
+              {publica
+                ? 'Abierta: el botón sale en la portada y responde solo a los clasificados.'
+                : 'Cerrada: el botón no sale en la portada y nadie puede descargarla.'}
+            </Aviso>
+          </div>
+        </Tarjeta>
+      )}
+
       <Tarjeta>
         <div className="flex flex-wrap items-start justify-between gap-5">
           <div>

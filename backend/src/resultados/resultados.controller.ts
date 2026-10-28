@@ -1,4 +1,5 @@
 import {
+  applyDecorators,
   Body,
   Controller,
   Delete,
@@ -12,19 +13,54 @@ import {
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { Ola, ResultadosService } from './resultados.service';
-import { EncargadoGuard } from './encargado.guard';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
-import { CurrentUser, JwtUser, Roles } from '../common/decorators';
+import { PermisoGuard } from '../permisos/permiso.guard';
+import { CurrentUser, JwtUser, Permiso, Roles } from '../common/decorators';
 
 /** Cada pantalla trabaja una tanda; sin `ola` se ven las dos juntas. */
 function tanda(valor?: string): Ola | undefined {
   return valor === 'tutores' || valor === 'comision' ? valor : undefined;
 }
 
+/**
+ * Resultados no es de todo el equipo.
+ *
+ * El administrador entra siempre. De los supervisores, cada uno llega hasta
+ * donde le dieron permiso: por eso cada ruta dice de qué pantalla es, y las
+ * que sirven a varias listan todas —basta tener una.
+ */
+const Comision = (...permisos: string[]) =>
+  applyDecorators(
+    UseGuards(JwtAuthGuard, RolesGuard, PermisoGuard),
+    Roles('ADMIN', 'SUPERVISOR'),
+    Permiso(...permisos),
+  );
+
+/** Las dos pantallas por tanda y las dos de lectura miran la misma tabla. */
+const LECTURA = [
+  'resultados-tutores',
+  'resultados-comision',
+  'resultados-general',
+  'resultados-consultar',
+];
+
 @Controller('resultados')
 export class ResultadosController {
   constructor(private resultados: ResultadosService) {}
+
+  // ------------------------------------------------------------------ público
+
+  /** Lo lee la página pública: si está abierta y con qué título. */
+  @Get('publico')
+  estadoPublico() {
+    return this.resultados.estadoPublico();
+  }
+
+  @Get('consulta')
+  consulta(@Query('dni') dni: string) {
+    return this.resultados.consultar(dni);
+  }
 
   // --------------------------------------------------------------------- tutor
 
@@ -36,58 +72,34 @@ export class ResultadosController {
     return this.resultados.miClasificacion(user.sub);
   }
 
-  // ------------------------------------------------------- quién está a cargo
-
-  /** Lo pregunta el panel para saber si muestra la sección. */
-  @UseGuards(JwtAuthGuard)
-  @Get('acceso')
-  acceso(@CurrentUser() user: JwtUser) {
-    return this.resultados.puedeEntrar(user);
-  }
-
-  /** Asignar y quitar encargados es solo del administrador. */
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('ADMIN')
-  @Get('encargados')
-  encargados() {
-    return this.resultados.encargados();
-  }
-
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('ADMIN')
-  @Post('encargados')
-  cambiarEncargado(@Body() body: { id: string; aCargo: boolean }) {
-    return this.resultados.cambiarEncargado(body?.id, Boolean(body?.aCargo));
-  }
-
   // ------------------------- el resto: el admin y el supervisor a cargo
 
-  @UseGuards(JwtAuthGuard, EncargadoGuard)
+  @Comision(...LECTURA)
   @Get()
   tabla(@Query('ola') ola?: string) {
     return this.resultados.porDelegacion(tanda(ola));
   }
 
-  @UseGuards(JwtAuthGuard, EncargadoGuard)
+  @Comision('resultados-general')
   @Get('general')
   general() {
     return this.resultados.general();
   }
 
   /** De las dos tandas: los sueltos se trabajan en un solo lugar. */
-  @UseGuards(JwtAuthGuard, EncargadoGuard)
+  @Comision('resultados-comision')
   @Get('individuales')
   individuales() {
     return this.resultados.individuales();
   }
 
-  @UseGuards(JwtAuthGuard, EncargadoGuard)
+  @Comision('resultados-tutores', 'resultados-comision')
   @Get('empates')
   empates(@Query('ola') ola?: string) {
     return this.resultados.empates(tanda(ola));
   }
 
-  @UseGuards(JwtAuthGuard, EncargadoGuard)
+  @Comision('resultados-tutores', 'resultados-comision', 'resultados-decidir')
   @Post('decidir')
   decidir(
     @Body() body: { clave: string; estado: 'CLASIFICA' | 'NO_CLASIFICA' | null },
@@ -96,7 +108,7 @@ export class ResultadosController {
     return this.resultados.decidir(body?.clave, body?.estado ?? null, tanda(ola));
   }
 
-  @UseGuards(JwtAuthGuard, EncargadoGuard)
+  @Comision('resultados-tutores', 'resultados-comision')
   @Post('porcentaje')
   porcentaje(@Body() body: { porcentaje: number }, @Query('ola') ola?: string) {
     return this.resultados.cambiarPorcentaje(body?.porcentaje, tanda(ola));
@@ -104,13 +116,13 @@ export class ResultadosController {
 
   // -------------------------------------------------------------- agrupaciones
 
-  @UseGuards(JwtAuthGuard, EncargadoGuard)
+  @Comision('resultados-comision')
   @Post('agrupaciones')
   crear(@Body() body: { nombre?: string; delegacionId?: string | null }) {
     return this.resultados.crearAgrupacion(body || {});
   }
 
-  @UseGuards(JwtAuthGuard, EncargadoGuard)
+  @Comision('resultados-comision')
   @Patch('agrupaciones/:id')
   cambiar(
     @Param('id') id: string,
@@ -120,7 +132,7 @@ export class ResultadosController {
     return this.resultados.cambiarAgrupacion(id, body || {}, tanda(ola));
   }
 
-  @UseGuards(JwtAuthGuard, EncargadoGuard)
+  @Comision('resultados-comision')
   @Delete('agrupaciones/:id')
   borrar(@Param('id') id: string, @Query('ola') ola?: string) {
     return this.resultados.borrarAgrupacion(id, tanda(ola));
@@ -128,13 +140,13 @@ export class ResultadosController {
 
   // --------------------------------------------------------------- publicación
 
-  @UseGuards(JwtAuthGuard, EncargadoGuard)
+  @Comision('resultados-tutores', 'resultados-comision')
   @Post('publicar')
   publicar(@Body() body: { ola: Ola; publicado: boolean }) {
     return this.resultados.publicar(body?.ola, Boolean(body?.publicado));
   }
 
-  @UseGuards(JwtAuthGuard, EncargadoGuard)
+  @Comision('resultados-general')
   @Post('publicar/general')
   publicarGeneral(@Body() body: { publicado: boolean }) {
     return this.resultados.publicarGeneral(Boolean(body?.publicado));
@@ -143,23 +155,45 @@ export class ResultadosController {
   // ------------------------------------------------------------ consultar
 
   /** Buscar por institución, tutor, nombre o DNI. */
-  @UseGuards(JwtAuthGuard, EncargadoGuard)
+  @Comision('resultados-consultar')
   @Get('buscar')
   buscar(@Query('q') q: string) {
     return this.resultados.buscar(q);
   }
 
   /** El Excel de una delegación, para mandárselo a su tutor. */
-  @UseGuards(JwtAuthGuard, EncargadoGuard)
+  @Comision('resultados-consultar')
   @Get('delegacion/:tutorId/excel')
   async excelDelegacion(@Param('tutorId') tutorId: string, @Res() res: Response) {
     const { buffer, nombre } = await this.resultados.excelDelegacion(tutorId);
     this.enviarExcel(res, buffer, nombre);
   }
 
+  /** Buscar estudiantes de las dos tandas para decidirlos a mano. */
+  @Comision('resultados-decidir')
+  @Get('alumnos')
+  alumnos(@Query('q') q: string) {
+    return this.resultados.buscarAlumnos(q);
+  }
+
+  // ------------------------------------------------------- la consulta pública
+
+  /** El título de la página pública y el interruptor de la consulta. */
+  @Comision('resultados-publica')
+  @Post('ajustes')
+  ajustes(@Body() body: { tituloPublico?: string; consultaActiva?: boolean }) {
+    return this.resultados.guardarAjustes(body || {});
+  }
+
+  @Comision('resultados-publica')
+  @Get('ajustes')
+  verAjustes() {
+    return this.resultados.estadoPublico();
+  }
+
   // -------------------------------------------------------------------- Excel
 
-  @UseGuards(JwtAuthGuard, EncargadoGuard)
+  @Comision(...LECTURA)
   @Get('excel')
   async excel(@Query('solo') solo: string, @Query('ola') ola: string, @Res() res: Response) {
     const { buffer, nombre } = await this.resultados.excel(solo === 'clasificados', tanda(ola));

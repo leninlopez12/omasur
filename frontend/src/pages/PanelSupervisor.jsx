@@ -1,18 +1,15 @@
 import { useEffect, useState } from 'react';
 import {
-  Award,
   ClipboardList,
   FileSpreadsheet,
   FlaskConical,
   Inbox,
   ListChecks,
   Search,
-  Trophy,
   Upload,
-  UserCheck,
-  Users,
 } from 'lucide-react';
 import PanelLayout from '../layouts/PanelLayout.jsx';
+import { Aviso, Cargando } from '../components/Ui.jsx';
 import { ExamenLlenar } from '../components/ExamenDelegacion.jsx';
 import { ExamenClave, ExamenPrueba } from '../components/ExamenConfig.jsx';
 import {
@@ -24,55 +21,52 @@ import {
 import Campanita from '../components/Campanita.jsx';
 import AvisosEnVivo from '../components/AvisosEnVivo.jsx';
 import {
-  ConsultarResultados,
-  ModuloResultados,
-  ResultadosGeneral,
-} from '../components/Resultados.jsx';
+  ContenidoComision,
+  SECCIONES_PANEL,
+  SECCION_RESULTADOS,
+  TITULOS_COMISION,
+  filtrarSecciones,
+  idsVisibles,
+} from '../components/SeccionesComision.jsx';
 import { NotificacionesProvider } from '../lib/notificaciones.jsx';
 import { api } from '../lib/api';
 
 /**
- * Panel del supervisor: solo el examen.
+ * El examen, recortado.
  *
  * El supervisor acompaña el día del examen: recibe, completa y consulta. Lo
  * que no tiene vuelta atrás —definir la prueba, anular un envío, cambiarle las
- * respuestas a un alumno— queda en manos del administrador.
+ * respuestas a un alumno— queda en manos del administrador, y la clave la ve
+ * sin poder tocarla.
  */
-const SECCIONES = [
-  { id: 'llenar', texto: 'Llenar por delegación', icono: Upload },
-  { id: 'entregas', texto: 'Entregas recibidas', icono: Inbox },
-  { id: 'consultas', texto: 'Consultas de envíos', icono: Search },
-  { id: 'consolidado', texto: 'Consolidado', icono: ClipboardList },
-  { id: 'enviadas', texto: 'Respuestas enviadas', icono: FileSpreadsheet },
-  { id: 'prueba', texto: 'Prueba de envío', icono: FlaskConical },
-  { id: 'clave', texto: 'Respuestas correctas', icono: ListChecks },
-];
-
-/** Solo para el supervisor que el administrador puso a cargo. */
-const SECCION_RESULTADOS = {
-  id: 'resultados',
-  texto: 'Resultados',
-  icono: Trophy,
+const SECCION_EXAMEN = {
+  id: 'examen',
+  texto: 'Examen',
+  icono: FileSpreadsheet,
+  permiso: 'examen',
   hijos: [
-    { id: 'res-tutores', texto: 'Enviadas por tutores', icono: UserCheck },
-    { id: 'res-comision', texto: 'Llenadas por comisión', icono: Users },
-    { id: 'res-general', texto: 'General y publicación', icono: Award },
-    { id: 'res-consultar', texto: 'Consultar y descargar', icono: Search },
+    { id: 'examen-llenar', texto: 'Llenar por delegación', icono: Upload },
+    { id: 'examen-entregas', texto: 'Entregas recibidas', icono: Inbox },
+    { id: 'examen-consultas', texto: 'Consultas de envíos', icono: Search },
+    { id: 'examen-consolidado', texto: 'Consolidado', icono: ClipboardList },
+    { id: 'examen-enviadas', texto: 'Respuestas enviadas', icono: FileSpreadsheet },
+    { id: 'examen-prueba', texto: 'Prueba de envío', icono: FlaskConical },
+    { id: 'examen-clave', texto: 'Respuestas correctas', icono: ListChecks },
   ],
 };
 
+/** El panel completo, antes de quedarse en lo que cada uno tenga permitido. */
+const TODAS = [SECCION_RESULTADOS, SECCION_EXAMEN, ...SECCIONES_PANEL];
+
 const TITULOS = {
-  llenar: 'Examen · Llenar por delegación',
-  entregas: 'Examen · Entregas recibidas',
-  consultas: 'Examen · Consultas de envíos',
-  consolidado: 'Examen · Consolidado',
-  enviadas: 'Examen · Respuestas enviadas',
-  prueba: 'Examen · Prueba de envío',
-  clave: 'Examen · Respuestas correctas',
-  'res-tutores': 'Resultados · Enviadas por los tutores',
-  'res-comision': 'Resultados · Llenadas por la comisión',
-  'res-general': 'Resultados · General y publicación',
-  'res-consultar': 'Resultados · Consultar y descargar',
+  ...TITULOS_COMISION,
+  'examen-llenar': 'Examen · Llenar por delegación',
+  'examen-entregas': 'Examen · Entregas recibidas',
+  'examen-consultas': 'Examen · Consultas de envíos',
+  'examen-consolidado': 'Examen · Consolidado',
+  'examen-enviadas': 'Examen · Respuestas enviadas',
+  'examen-prueba': 'Examen · Prueba de envío',
+  'examen-clave': 'Examen · Respuestas correctas',
 };
 
 export default function PanelSupervisor() {
@@ -83,47 +77,87 @@ export default function PanelSupervisor() {
   );
 }
 
+/**
+ * Panel del supervisor.
+ *
+ * No hay un panel del supervisor: hay uno por supervisor. El administrador
+ * reparte los módulos en Resultados · Supervisor a cargo y aquí se arma el
+ * sidebar con lo que le tocó. Si no le tocó nada, se lo dice en una línea en
+ * vez de dejarlo mirando un panel vacío.
+ */
 function Contenido() {
-  const [seccion, setSeccion] = useState('llenar');
-  // El administrador decide quién ve los resultados; aquí solo se pregunta.
-  const [aCargo, setACargo] = useState(false);
+  const [permisos, setPermisos] = useState(null);
+  const [seccion, setSeccion] = useState(null);
+  const [detalleId, setDetalleId] = useState(null);
 
   useEffect(() => {
     api
-      .get('/resultados/acceso')
-      .then(({ data }) => setACargo(Boolean(data.puede)))
-      .catch(() => setACargo(false));
+      .get('/permisos/mios')
+      .then(({ data }) => setPermisos(data.esAdmin ? null : data.permisos || []))
+      .catch(() => setPermisos([]));
   }, []);
 
-  const secciones = aCargo ? [SECCION_RESULTADOS, ...SECCIONES] : SECCIONES;
+  if (permisos === null) return <Cargando texto="Cargando su panel" />;
+
+  const secciones = filtrarSecciones(TODAS, permisos);
+  const visibles = idsVisibles(secciones);
+
+  if (visibles.length === 0) {
+    return (
+      <PanelLayout compacto titulo="Panel" secciones={[]} actual="" alCambiar={() => {}}>
+        <Aviso tipo="info">
+          Todavía no tiene módulos asignados. El administrador se los habilita desde Resultados ·
+          Supervisor a cargo.
+        </Aviso>
+      </PanelLayout>
+    );
+  }
+
+  // La primera sección hace de inicio, y también de red: si le quitan el
+  // permiso de la que estaba viendo, cae en una que sí puede abrir.
+  const actual = visibles.includes(seccion) ? seccion : visibles[0];
+
+  const cambiarSeccion = (id) => {
+    setDetalleId(null);
+    setSeccion(id);
+  };
+
+  const abrirTutor = (tutorId) => {
+    if (!visibles.includes('inscripciones')) return;
+    setSeccion('inscripciones');
+    setDetalleId(tutorId);
+  };
 
   return (
     <PanelLayout
       compacto
-      titulo={TITULOS[seccion]}
+      titulo={TITULOS[actual]}
       secciones={secciones}
-      actual={seccion}
-      alCambiar={setSeccion}
-      acciones={<Campanita />}
+      actual={actual}
+      alCambiar={cambiarSeccion}
+      acciones={<Campanita alAbrirTutor={abrirTutor} />}
     >
-      <AvisosEnVivo />
+      <AvisosEnVivo alAbrirTutor={abrirTutor} />
 
-      {seccion === 'entregas' && <ExamenEntregas />}
-      {seccion === 'llenar' && <ExamenLlenar />}
-      {seccion === 'consultas' && <ExamenConsultas />}
-      {seccion === 'consolidado' && <ExamenConsolidado />}
+      {actual === 'examen-llenar' && <ExamenLlenar />}
+      {actual === 'examen-entregas' && <ExamenEntregas />}
+      {actual === 'examen-consultas' && <ExamenConsultas />}
+      {actual === 'examen-consolidado' && <ExamenConsolidado />}
+      {actual === 'examen-enviadas' && <ExamenEnviadas />}
+      {actual === 'examen-prueba' && <ExamenPrueba />}
+      {actual === 'examen-clave' && <ExamenClave />}
 
-      {aCargo && (
-        <>
-          {seccion === 'res-tutores' && <ModuloResultados ola="tutores" />}
-          {seccion === 'res-comision' && <ModuloResultados ola="comision" />}
-          {seccion === 'res-general' && <ResultadosGeneral />}
-          {seccion === 'res-consultar' && <ConsultarResultados />}
-        </>
-      )}
-      {seccion === 'enviadas' && <ExamenEnviadas />}
-      {seccion === 'prueba' && <ExamenPrueba />}
-      {seccion === 'clave' && <ExamenClave />}
+      <ContenidoComision
+        seccion={actual}
+        detalleId={detalleId}
+        setDetalleId={setDetalleId}
+        abrirTutor={abrirTutor}
+        irA={(destino, tutorId) => {
+          if (!visibles.includes(destino)) return;
+          cambiarSeccion(destino);
+          if (tutorId) setDetalleId(tutorId);
+        }}
+      />
     </PanelLayout>
   );
 }

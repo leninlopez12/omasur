@@ -5,6 +5,7 @@ import Ingresar from './pages/Ingresar.jsx';
 import Recuperar from './pages/Recuperar.jsx';
 import NuevaClave from './pages/NuevaClave.jsx';
 import Credencial from './pages/Credencial.jsx';
+import ResultadosEtapa from './pages/ResultadosEtapa.jsx';
 import PanelTutor from './pages/PanelTutor.jsx';
 import PanelAdmin from './pages/PanelAdmin.jsx';
 import PanelSupervisor from './pages/PanelSupervisor.jsx';
@@ -28,6 +29,7 @@ export default function App() {
       <Route path="/recuperar" element={<Recuperar />} />
       <Route path="/recuperar/:token" element={<NuevaClave />} />
       <Route path="/credencial" element={<Credencial />} />
+      <Route path="/resultados_etapa_institucional" element={<ResultadosEtapa />} />
       <Route
         path="/panel/*"
         element={

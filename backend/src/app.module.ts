@@ -13,11 +13,13 @@ import { SettingsModule } from './settings/settings.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { StorageModule } from './storage/storage.module';
 import { MailModule } from './mail/mail.module';
+import { PermisosModule } from './permisos/permisos.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     PrismaModule,
+    PermisosModule,
     AuthModule,
     TutorsModule,
     StudentsModule,

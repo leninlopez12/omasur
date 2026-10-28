@@ -14,7 +14,8 @@ import type { Response } from 'express';
 import { AdminService } from './admin.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
-import { CurrentUser, JwtUser, Roles } from '../common/decorators';
+import { PermisoGuard } from '../permisos/permiso.guard';
+import { CurrentUser, JwtUser, Permiso, Roles } from '../common/decorators';
 import { SupervisoresService } from './supervisores.service';
 import { SistemaService } from './sistema.service';
 import { AvisosService } from './avisos.service';
@@ -24,7 +25,7 @@ import { AbonosService, FiltrosAbonos } from './abonos.service';
 import { AlcanceConsolidado, ConsolidadoService } from './consolidado.service';
 import { AccesoService } from './acceso.service';
 
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, PermisoGuard)
 @Roles('ADMIN', 'SUPERVISOR')
 @Controller('admin')
 export class AdminController {
@@ -40,11 +41,13 @@ export class AdminController {
     private acceso: AccesoService,
   ) {}
 
+  @Permiso('tablero')
   @Get('metricas')
   metricas() {
     return this.admin.metricas();
   }
 
+  @Permiso('delegaciones')
   @Get('inscripciones')
   inscripciones(
     @Query('estado') estado?: string,
@@ -54,11 +57,13 @@ export class AdminController {
     return this.admin.inscripciones({ estado, region, buscar });
   }
 
+  @Permiso('consultas')
   @Get('tutores')
   tutores(@Query('estado') estado?: string, @Query('buscar') buscar?: string) {
     return this.admin.tutores({ estado, buscar });
   }
 
+  @Permiso('consultas')
   @Get('estudiantes')
   estudiantes(
     @Query('estado') estado?: string,
@@ -68,11 +73,13 @@ export class AdminController {
     return this.admin.estudiantes({ estado, grado, buscar });
   }
 
+  @Permiso('delegaciones', 'inscripciones')
   @Get('inscripciones/:id')
   detalle(@Param('id') id: string) {
     return this.admin.detalle(id);
   }
 
+  @Permiso('delegaciones', 'inscripciones')
   @Patch('inscripciones/:id/revisar')
   revisar(
     @Param('id') id: string,
@@ -83,6 +90,7 @@ export class AdminController {
   }
 
   /** Aprobar o rechazar un comprobante suelto del historial de pagos. */
+  @Permiso('delegaciones', 'inscripciones')
   @Patch('pagos/:id/revisar')
   revisarPago(
     @Param('id') id: string,
@@ -92,6 +100,7 @@ export class AdminController {
     return this.admin.revisarPago(id, body.estado, body.observacion, usuario.nombre);
   }
 
+  @Permiso('delegaciones')
   @Get('exportar')
   async exportar(@Res() res: Response) {
     const buffer = await this.admin.exportarConsolidado();
@@ -111,6 +120,7 @@ export class AdminController {
   // Revisión alumno por alumno, para el supervisor.
   // ------------------------------------------------------------------
 
+  @Permiso('inscripciones')
   @Get('revisar')
   paraRevisar(
     @Query('estado') estado?: string,
@@ -125,11 +135,13 @@ export class AdminController {
   // Abonos: el dinero visto por delegación, no por estudiante.
   // ------------------------------------------------------------------
 
+  @Permiso('abonos')
   @Get('abonos')
   resumenAbonos(@Query() filtros: FiltrosAbonos) {
     return this.abonos.resumen(filtros);
   }
 
+  @Permiso('abonos')
   @Get('abonos/excel')
   async abonosExcel(@Query() filtros: FiltrosAbonos, @Res() res: Response) {
     const buffer = await this.abonos.excel(filtros);
@@ -145,11 +157,13 @@ export class AdminController {
   // Consolidado para el día del examen: por categoría y por delegación.
   // ------------------------------------------------------------------
 
+  @Permiso('consolidado')
   @Get('consolidado')
   verConsolidado(@Query('alcance') alcance?: string, @Query('categoria') categoria?: string) {
     return this.consolidado.resumen(this.alcance(alcance), categoria);
   }
 
+  @Permiso('consolidado')
   @Get('consolidado/excel')
   async consolidadoExcel(
     @Query('alcance') alcance: string,
@@ -172,16 +186,19 @@ export class AdminController {
     return valor === 'EN_PROCESO' ? 'EN_PROCESO' : 'APROBADOS';
   }
 
+  @Permiso('reportes')
   @Get('reportes/opciones')
   opcionesReporte() {
     return this.reportes.opciones();
   }
 
+  @Permiso('reportes')
   @Get('reportes')
   previsualizarReporte(@Query() filtros: FiltrosReporte) {
     return this.reportes.previsualizar(filtros);
   }
 
+  @Permiso('reportes')
   @Get('reportes/excel')
   async reporteExcel(@Query() filtros: FiltrosReporte, @Res() res: Response) {
     const buffer = await this.reportes.excel(filtros);
@@ -219,19 +236,22 @@ export class AdminController {
   // Entrar a la cuenta de un tutor. Solo el administrador.
   // ------------------------------------------------------------------
 
-  @Roles('ADMIN')
+  @Roles('ADMIN', 'SUPERVISOR')
+  @Permiso('acceder')
   @Get('acceder')
   tutoresParaAcceder(@Query('buscar') buscar?: string) {
     return this.acceso.tutores(buscar);
   }
 
-  @Roles('ADMIN')
+  @Roles('ADMIN', 'SUPERVISOR')
+  @Permiso('acceder')
   @Post('acceder/:tutorId')
   acceder(@Param('tutorId') tutorId: string, @CurrentUser() usuario: JwtUser) {
     return this.acceso.entrar(tutorId, usuario);
   }
 
-  @Roles('ADMIN')
+  @Roles('ADMIN', 'SUPERVISOR')
+  @Permiso('tablero')
   @Get('estado')
   estado() {
     return this.sistema.estado();

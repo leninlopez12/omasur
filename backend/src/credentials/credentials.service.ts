@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { etiquetaGrado } from '../common/grados';
 import { Etapa, EtapasService } from './etapas.service';
 import { StorageService } from '../storage/storage.service';
+import { ResultadosService } from '../resultados/resultados.service';
 
 const GRANATE = '#7B1E2B';
 const GRANATE_OSCURO = '#5A121C';
@@ -39,19 +40,64 @@ interface Impresion {
   nombreTitulo: string;
 }
 
+/** Dónde se guarda si la credencial pública está abierta. */
+const CLAVE_PUBLICA = 'credencial_publica';
+
 @Injectable()
 export class CredentialsService {
   constructor(
     private prisma: PrismaService,
     private etapas: EtapasService,
     private almacenamiento: StorageService,
+    private resultados: ResultadosService,
   ) {}
+
+  /**
+   * La credencial pública de la etapa macrorregional.
+   *
+   * Se abre aparte porque ya no es para todos: pasada la etapa institucional
+   * la credencial le toca solo a quien clasificó, y mientras la comisión no
+   * la habilite no se entrega ninguna.
+   */
+  async publica() {
+    const fila = await this.prisma.ajuste.findUnique({ where: { clave: CLAVE_PUBLICA } });
+    return { activa: fila?.valor === 'true' };
+  }
+
+  async cambiarPublica(activa: boolean) {
+    const valor = activa ? 'true' : 'false';
+    await this.prisma.ajuste.upsert({
+      where: { clave: CLAVE_PUBLICA },
+      create: { clave: CLAVE_PUBLICA, valor },
+      update: { valor },
+    });
+    return { activa };
+  }
+
+  /** Nadie baja una credencial si no está habilitada o no clasificó. */
+  private async comprobarClasificado(dni: string) {
+    const { activa } = await this.publica();
+    if (!activa) {
+      throw new NotFoundException(
+        'La descarga de credenciales todavía no está habilitada. Vuelva a intentarlo más tarde.',
+      );
+    }
+
+    const { resultados } = await this.resultados.calcular();
+    const suyos = resultados.filter((r) => r.dni === dni.trim());
+
+    if (suyos.length > 0 && !suyos.some((r) => r.estado === 'CLASIFICA')) {
+      throw new ForbiddenException('No clasificaste a la siguiente etapa.');
+    }
+  }
 
   /**
    * Consulta pública. Solo devuelve los datos del estudiante cuando la comisión
    * ya aprobó la inscripción de su institución; mientras tanto no se expone nada.
    */
   async consultarPorDni(dni: string) {
+    await this.comprobarClasificado(dni);
+
     const alumno = await this.prisma.student.findUnique({
       where: { dni: dni.trim() },
       include: { tutor: true },
@@ -74,7 +120,16 @@ export class CredentialsService {
     };
   }
 
-  async credencialPorDni(dni: string, etapa?: string): Promise<Buffer> {
+  /**
+   * La credencial de un estudiante por su DNI.
+   *
+   * `publica` es la consulta de la portada, que exige que la descarga esté
+   * abierta y que el estudiante haya clasificado. La comisión la pide desde su
+   * panel para atender a quien llama, y ahí esas dos condiciones no van.
+   */
+  async credencialPorDni(dni: string, etapa?: string, publica = true): Promise<Buffer> {
+    if (publica) await this.comprobarClasificado(dni);
+
     const alumno = await this.prisma.student.findUnique({
       where: { dni: dni.trim() },
       include: { tutor: true },

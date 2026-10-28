@@ -2,10 +2,15 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { LayoutDashboard, LogIn, Menu, UserPlus, X } from 'lucide-react';
 import { rutaPorRol, useAuth } from '../lib/auth.jsx';
+import { useAjustes } from '../lib/ajustes';
 import Logo from './Logo.jsx';
 
+/**
+ * Los resultados van primero y subrayados: es lo que todo el mundo viene a
+ * buscar cuando salen, y a diferencia de los demás es una página aparte.
+ */
 const ENLACES = [
-  { href: '#participantes', texto: 'Participantes' },
+  { href: '/resultados_etapa_institucional', texto: 'Resultados', ruta: true },
   { href: '#etapas', texto: 'Etapas' },
   { href: '#premios', texto: 'Premios' },
 ];
@@ -14,7 +19,10 @@ export default function Navbar() {
   const [abierto, setAbierto] = useState(false);
   const [conFondo, setConFondo] = useState(false);
   const { usuario } = useAuth();
+  const { ajustes } = useAjustes();
   const navegar = useNavigate();
+  // Cerradas las inscripciones, el botón sobra: queda solo el de ingresar.
+  const seInscribe = !ajustes.inscripcionesCerradas;
 
   useEffect(() => {
     const alHacerScroll = () => setConFondo(window.scrollY > 24);
@@ -43,17 +51,21 @@ export default function Navbar() {
         </Link>
 
         <div className="hidden items-center gap-8 lg:flex">
-          {ENLACES.map((enlace) => (
-            <a
-              key={enlace.href}
-              href={enlace.href}
-              className={`text-xl font-medium transition hover:text-granate-500 ${
-                conFondo ? 'text-slate-700' : 'text-white/90'
-              }`}
-            >
-              {enlace.texto}
-            </a>
-          ))}
+          {ENLACES.map((enlace) => {
+            const estilo = `text-xl transition hover:text-granate-500 ${
+              enlace.ruta ? 'font-bold underline underline-offset-8' : 'font-medium'
+            } ${conFondo ? 'text-slate-700' : 'text-white/90'}`;
+
+            return enlace.ruta ? (
+              <Link key={enlace.href} to={enlace.href} className={estilo}>
+                {enlace.texto}
+              </Link>
+            ) : (
+              <a key={enlace.href} href={enlace.href} className={estilo}>
+                {enlace.texto}
+              </a>
+            );
+          })}
         </div>
 
         <div className="hidden items-center gap-3 lg:flex">
@@ -76,13 +88,15 @@ export default function Navbar() {
                 <LogIn className="h-6 w-6" />
                 Ingresar
               </Link>
-              <Link
-                to="/inscripcion"
-                className="inline-flex items-center gap-2 rounded-2xl bg-granate-600 px-6 py-3 text-xl font-semibold text-white shadow-suave transition hover:bg-granate-700"
-              >
-                <UserPlus className="h-6 w-6" />
-                Inscribir
-              </Link>
+              {seInscribe && (
+                <Link
+                  to="/inscripcion"
+                  className="inline-flex items-center gap-2 rounded-2xl bg-granate-600 px-6 py-3 text-xl font-semibold text-white shadow-suave transition hover:bg-granate-700"
+                >
+                  <UserPlus className="h-6 w-6" />
+                  Inscribir
+                </Link>
+              )}
             </>
           )}
         </div>
@@ -98,16 +112,31 @@ export default function Navbar() {
 
       {abierto && (
         <div className="border-t border-slate-100 bg-white px-6 pb-6 pt-2 lg:hidden">
-          {ENLACES.map((enlace) => (
-            <a
-              key={enlace.href}
-              href={enlace.href}
-              onClick={() => setAbierto(false)}
-              className="block border-b border-slate-100 py-4 text-xl font-medium text-slate-700"
-            >
-              {enlace.texto}
-            </a>
-          ))}
+          {ENLACES.map((enlace) => {
+            const estilo = `block border-b border-slate-100 py-4 text-xl text-slate-700 ${
+              enlace.ruta ? 'font-bold underline underline-offset-4' : 'font-medium'
+            }`;
+
+            return enlace.ruta ? (
+              <Link
+                key={enlace.href}
+                to={enlace.href}
+                onClick={() => setAbierto(false)}
+                className={estilo}
+              >
+                {enlace.texto}
+              </Link>
+            ) : (
+              <a
+                key={enlace.href}
+                href={enlace.href}
+                onClick={() => setAbierto(false)}
+                className={estilo}
+              >
+                {enlace.texto}
+              </a>
+            );
+          })}
           <div className="mt-5 flex flex-col gap-3">
             <Link
               to="/ingresar"
@@ -115,12 +144,14 @@ export default function Navbar() {
             >
               Ingresar
             </Link>
-            <Link
-              to="/inscripcion"
-              className="rounded-2xl bg-granate-600 px-6 py-3 text-center text-xl font-semibold text-white"
-            >
-              Inscribir delegación
-            </Link>
+            {seInscribe && (
+              <Link
+                to="/inscripcion"
+                className="rounded-2xl bg-granate-600 px-6 py-3 text-center text-xl font-semibold text-white"
+              >
+                Inscribir delegación
+              </Link>
+            )}
           </div>
         </div>
       )}

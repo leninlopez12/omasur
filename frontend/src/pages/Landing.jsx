@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Building2,
@@ -14,6 +14,7 @@ import Footer from '../components/Footer.jsx';
 import { Boton } from '../components/Ui.jsx';
 import { CONVENIOS, GRADOS } from '../lib/datos';
 import { useAjustes } from '../lib/ajustes';
+import { api } from '../lib/api';
 import IconoWhatsApp from '../components/IconoWhatsApp.jsx';
 import BotonWhatsApp from '../components/BotonWhatsApp.jsx';
 import Comunicado from '../components/Comunicado.jsx';
@@ -77,6 +78,21 @@ export default function Landing() {
   const { ajustes } = useAjustes();
   const grupos = ajustes.grupos;
   const cerradas = ajustes.inscripcionesCerradas;
+  const [resultados, setResultados] = useState(null);
+
+  const [credencial, setCredencial] = useState(null);
+
+  useEffect(() => {
+    api
+      .get('/resultados/publico')
+      .then(({ data }) => setResultados(data))
+      .catch(() => setResultados(null));
+
+    api
+      .get('/credenciales/publica')
+      .then(({ data }) => setCredencial(data))
+      .catch(() => setCredencial(null));
+  }, []);
 
   return (
     <div className="min-h-screen scroll-smooth bg-white">
@@ -110,23 +126,45 @@ export default function Landing() {
             <span className="mt-3 block text-red-400">UNI 2026</span>
           </h1>
 
-          <div className="animate-aparecer mt-12 flex flex-col items-center justify-center gap-4 sm:flex-row">
-            <Link to="/inscripcion">
-              <Boton variante="blanco" tamano="grande">
-                {cerradas ? <Lock className="h-7 w-7" /> : <UserPlus className="h-7 w-7" />}
-                {cerradas ? 'Inscripciones culminadas' : 'Inscribir delegación'}
-              </Boton>
-            </Link>
-            <Link to="/credencial">
-              <Boton
-                tamano="grande"
-                className="border-2 border-white/60 bg-transparent text-white hover:bg-white/10"
-              >
-                <IdCard className="h-7 w-7" />
-                Mi credencial
-              </Boton>
-            </Link>
-          </div>
+          {/* Mientras la consulta esté abierta, lo primero es el resultado:
+              late para que nadie lo pase por alto. */}
+          {resultados?.activa && (
+            <div className="animate-aparecer mt-12 flex justify-center">
+              <Link to="/resultados_etapa_institucional">
+                <Boton variante="rojo" tamano="grande" className="animate-latido font-black">
+                  {resultados.titulo}
+                </Boton>
+              </Link>
+            </div>
+          )}
+
+          {/* Cada botón aparece solo en su momento: inscribir mientras la
+              inscripción esté abierta y la credencial cuando la comisión la
+              habilite. Un botón que no lleva a nada es peor que ninguno. */}
+          {(!cerradas || credencial?.activa) && (
+            <div className="animate-aparecer mt-12 flex flex-col items-center justify-center gap-4 sm:flex-row">
+              {!cerradas && (
+                <Link to="/inscripcion">
+                  <Boton variante="blanco" tamano="grande">
+                    <UserPlus className="h-7 w-7" />
+                    Inscribir delegación
+                  </Boton>
+                </Link>
+              )}
+
+              {credencial?.activa && (
+                <Link to="/credencial">
+                  <Boton
+                    tamano="grande"
+                    className="border-2 border-white/60 bg-transparent text-white hover:bg-white/10"
+                  >
+                    <IdCard className="h-7 w-7" />
+                    Mi credencial
+                  </Boton>
+                </Link>
+              )}
+            </div>
+          )}
 
           {/* El PDF lo sube el administrador; sin bases cargadas no hay botón
               que lleve a un enlace roto. Se abre aparte para no sacar al
@@ -155,7 +193,7 @@ export default function Landing() {
           primero que hay que saber, y el rojo claro es el mismo de «UNI 2026». */}
       <div className="relative z-10 w-full bg-granate-700 px-6 py-4 text-center">
         <p className="text-2xl font-black uppercase leading-tight tracking-tight text-red-400 sm:text-3xl">
-          Inscripciones hasta el lunes 19 de octubre de 2026
+          Segunda etapa · 08 de noviembre · Final macrorregional
         </p>
       </div>
 

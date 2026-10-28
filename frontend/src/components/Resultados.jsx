@@ -1107,134 +1107,6 @@ export function ResultadosGeneral() {
   );
 }
 
-
-/**
- * Resultados · Supervisor a cargo.
- *
- * La sección no es de todo el equipo: el administrador entra siempre y de los
- * supervisores solo entran los que él marque aquí. A los demás no se les
- * muestra ni en el sidebar, y el servidor también se los niega.
- */
-export function EncargadosResultados() {
-  const [lista, setLista] = useState(null);
-  const [error, setError] = useState('');
-  const [mensaje, setMensaje] = useState('');
-  const [procesando, setProcesando] = useState('');
-
-  useEffect(() => {
-    api
-      .get('/resultados/encargados')
-      .then(({ data }) => setLista(data))
-      .catch((e) => setError(mensajeError(e, 'No se pudieron cargar los supervisores')));
-  }, []);
-
-  if (error && !lista) {
-    return (
-      <Aviso tipo="error" icono={AlertCircle}>
-        {error}
-      </Aviso>
-    );
-  }
-  if (!lista) return <Cargando texto="Cargando supervisores" />;
-
-  const cambiar = async (supervisor, aCargo) => {
-    setError('');
-    setMensaje('');
-    setProcesando(supervisor.id);
-    try {
-      const { data } = await api.post('/resultados/encargados', { id: supervisor.id, aCargo });
-      setLista(data);
-      setMensaje(
-        aCargo
-          ? `${supervisor.nombre} ya puede trabajar los resultados.`
-          : `${supervisor.nombre} ya no tiene acceso a los resultados.`,
-      );
-    } catch (e) {
-      setError(mensajeError(e, 'No se pudo cambiar el encargado'));
-    } finally {
-      setProcesando('');
-    }
-  };
-
-  const aCargo = lista.filter((s) => s.aCargo).length;
-
-  return (
-    <div className="space-y-6">
-      <Tarjeta>
-        <h3 className="text-3xl font-black text-slate-900">Supervisor a cargo</h3>
-        <p className="mt-2 text-xl text-slate-600">
-          Marque quién puede entrar a Resultados. Los demás supervisores no la verán siquiera.
-        </p>
-      </Tarjeta>
-
-      {error && (
-        <Aviso tipo="error" icono={AlertCircle}>
-          {error}
-        </Aviso>
-      )}
-      {mensaje && (
-        <Aviso tipo="exito" icono={CheckCircle2}>
-          {mensaje}
-        </Aviso>
-      )}
-
-      <Tarjeta>
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h4 className="text-xl font-black text-slate-900">
-            {lista.length} {lista.length === 1 ? 'supervisor' : 'supervisores'}
-          </h4>
-          <Etiqueta compacto className="bg-granate-50 text-granate-700">
-            {aCargo} con acceso
-          </Etiqueta>
-        </div>
-
-        {lista.length === 0 ? (
-          <div className="mt-6">
-            <Aviso tipo="info" icono={AlertCircle} compacto>
-              Todavía no hay supervisores. Créelos en Ajustes · Supervisores.
-            </Aviso>
-          </div>
-        ) : (
-          <div className="mt-6 space-y-3">
-            {lista.map((s) => (
-              <div
-                key={s.id}
-                className={`flex flex-wrap items-center justify-between gap-4 rounded-2xl border-2 p-5 ${
-                  s.aCargo ? 'border-emerald-200 bg-emerald-50/60' : 'border-slate-200'
-                }`}
-              >
-                <div>
-                  <p className="text-xl font-black text-slate-900">{s.nombre}</p>
-                  <p className="mt-1 text-base text-slate-600">{s.correo}</p>
-                </div>
-
-                <div className="flex flex-wrap items-center gap-3">
-                  <Etiqueta
-                    compacto
-                    className={
-                      s.aCargo ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-600'
-                    }
-                  >
-                    {s.aCargo ? 'A cargo' : 'Sin acceso'}
-                  </Etiqueta>
-                  <Boton
-                    variante={s.aCargo ? 'contorno' : 'exito'}
-                    tamano="chico"
-                    cargando={procesando === s.id}
-                    onClick={() => cambiar(s, !s.aCargo)}
-                  >
-                    {s.aCargo ? 'Quitar acceso' : 'Poner a cargo'}
-                  </Boton>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </Tarjeta>
-    </div>
-  );
-}
-
 /**
  * Resultados · Consultar y descargar.
  *
@@ -1386,6 +1258,334 @@ export function ConsultarResultados() {
           </div>
         </Tarjeta>
       ))}
+    </div>
+  );
+}
+
+/**
+ * Resultados · Decidir a mano.
+ *
+ * Busca un estudiante de cualquiera de las dos tandas y le cambia el
+ * resultado. Es la salida para los casos que el porcentaje no resuelve bien:
+ * se ve cómo quedó, se invierte, y queda marcado como decisión de alguien y
+ * no del cálculo.
+ */
+export function DecidirAlumnos() {
+  const [texto, setTexto] = useState('');
+  const [datos, setDatos] = useState(null);
+  const [error, setError] = useState('');
+  const [buscando, setBuscando] = useState(false);
+  const [guardando, setGuardando] = useState('');
+
+  const consultar = async (termino) => {
+    setError('');
+    if (termino.trim().length < 2) {
+      setDatos(null);
+      return setError('Escriba al menos dos letras, o el DNI del estudiante.');
+    }
+
+    setBuscando(true);
+    try {
+      const { data } = await api.get('/resultados/alumnos', { params: { q: termino.trim() } });
+      setDatos(data);
+    } catch (e) {
+      setError(mensajeError(e, 'No se pudo buscar'));
+    } finally {
+      setBuscando(false);
+    }
+  };
+
+  const decidir = async (alumno, estado) => {
+    setError('');
+    setGuardando(alumno.clave);
+    try {
+      await api.post('/resultados/decidir', { clave: alumno.clave, estado });
+      await consultar(texto);
+    } catch (e) {
+      setError(mensajeError(e, 'No se pudo guardar la decisión'));
+    } finally {
+      setGuardando('');
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <Tarjeta>
+        <h3 className="text-3xl font-black text-slate-900">Decidir a mano</h3>
+        <p className="mt-2 text-xl text-slate-600">
+          Busque a un estudiante por nombre, institución o DNI —de cualquiera de las dos tandas— y
+          cambie si clasifica o no.
+        </p>
+
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            consultar(texto);
+          }}
+          className="mt-8 flex flex-wrap items-end gap-3"
+        >
+          <div className="min-w-[18rem] flex-1">
+            <Campo
+              etiqueta="Buscar"
+              icono={Search}
+              placeholder="Nombre, institución o DNI"
+              value={texto}
+              onChange={(e) => setTexto(e.target.value)}
+            />
+          </div>
+          <Boton type="submit" cargando={buscando}>
+            Buscar
+          </Boton>
+        </form>
+
+        {error && (
+          <div className="mt-6">
+            <Aviso tipo="info" icono={AlertCircle} compacto>
+              {error}
+            </Aviso>
+          </div>
+        )}
+      </Tarjeta>
+
+      {datos && datos.alumnos.length === 0 && (
+        <Tarjeta>
+          <Aviso tipo="info" icono={AlertCircle} compacto>
+            Ningún estudiante coincide con «{texto}».
+          </Aviso>
+        </Tarjeta>
+      )}
+
+      {datos && datos.alumnos.length > 0 && (
+        <Tarjeta>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h4 className="text-xl font-black text-slate-900">
+              {datos.total} {datos.total === 1 ? 'coincidencia' : 'coincidencias'}
+            </h4>
+            {datos.recortado && (
+              <Etiqueta compacto className="bg-amber-100 text-amber-800">
+                Se muestran los primeros {datos.alumnos.length}
+              </Etiqueta>
+            )}
+          </div>
+
+          <div className="mt-6 space-y-3">
+            {datos.alumnos.map((a) => {
+              const clasifica = a.estado === 'CLASIFICA';
+
+              return (
+                <div
+                  key={a.clave}
+                  className={`rounded-2xl border-2 p-5 ${
+                    clasifica ? 'border-emerald-200 bg-emerald-50/50' : 'border-slate-200'
+                  }`}
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-4">
+                    <div className="min-w-0">
+                      <p className="text-xl font-black text-slate-900">{a.nombres}</p>
+                      <p className="mt-1 text-base text-slate-600">
+                        DNI {a.dni} · CAT. {a.categoria} · {a.institucion}
+                      </p>
+                      <p className="mt-1 text-base text-slate-500">
+                        {a.puntaje} puntos · puesto {a.puesto} ·{' '}
+                        {a.ola === 'tutores' ? 'tanda de tutores' : 'tanda de la comisión'}
+                        {a.compitioEn && ` · compitió con ${a.compitioEn}`}
+                      </p>
+                    </div>
+
+                    <div className="flex flex-col items-end gap-2">
+                      <Etiqueta compacto className={COLOR[a.estado]}>
+                        {ETIQUETA[a.estado]}
+                      </Etiqueta>
+                      {a.empatado && (
+                        <span className="text-base text-amber-700">por empate</span>
+                      )}
+                      {a.manual && (
+                        <span className="text-base text-slate-500">decidido a mano</span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="mt-4 flex flex-wrap gap-2 border-t border-slate-200 pt-4">
+                    <Boton
+                      variante={clasifica ? 'contorno' : 'exito'}
+                      tamano="chico"
+                      cargando={guardando === a.clave}
+                      onClick={() =>
+                        decidir(a, clasifica ? 'NO_CLASIFICA' : 'CLASIFICA')
+                      }
+                    >
+                      {clasifica ? 'Marcar que no clasifica' : 'Marcar que clasifica'}
+                    </Boton>
+
+                    {a.manual && (
+                      <Boton
+                        variante="fantasma"
+                        tamano="chico"
+                        cargando={guardando === a.clave}
+                        onClick={() => decidir(a, null)}
+                      >
+                        Volver al cálculo
+                      </Boton>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </Tarjeta>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Resultados · Hacer pública la consulta.
+ *
+ * Abre la página donde cualquiera consulta su resultado con su DNI. Va
+ * aparte de publicar a los tutores: son dos públicos distintos y no tienen
+ * por qué enterarse a la vez.
+ */
+export function ConsultaPublica() {
+  const [config, setConfig] = useState(null);
+  const [error, setError] = useState('');
+  const [mensaje, setMensaje] = useState('');
+  const [guardando, setGuardando] = useState(false);
+
+  useEffect(() => {
+    api
+      .get('/resultados/ajustes')
+      .then(({ data }) => setConfig({ titulo: data.titulo, activa: data.activa }))
+      .catch((e) => setError(mensajeError(e, 'No se pudo cargar la configuración')));
+  }, []);
+
+  if (error && !config) {
+    return (
+      <Aviso tipo="error" icono={AlertCircle}>
+        {error}
+      </Aviso>
+    );
+  }
+  if (!config) return <Cargando texto="Cargando la configuración" />;
+
+  const guardar = async (cambios, texto) => {
+    setError('');
+    setMensaje('');
+    setGuardando(true);
+    try {
+      const { data } = await api.post('/resultados/ajustes', cambios);
+      setConfig({ titulo: data.tituloPublico, activa: data.consultaActiva });
+      setMensaje(texto);
+    } catch (e) {
+      setError(mensajeError(e, 'No se pudo guardar'));
+    } finally {
+      setGuardando(false);
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <Tarjeta>
+        <h3 className="text-3xl font-black text-slate-900">Hacer pública la consulta</h3>
+        <p className="mt-2 text-xl text-slate-600">
+          Abre una página donde cualquiera consulta su resultado con su DNI. No hay lista a la
+          vista: cada quien ve solo el suyo.
+        </p>
+      </Tarjeta>
+
+      {error && (
+        <Aviso tipo="error" icono={AlertCircle}>
+          {error}
+        </Aviso>
+      )}
+      {mensaje && (
+        <Aviso tipo="exito" icono={CheckCircle2}>
+          {mensaje}
+        </Aviso>
+      )}
+
+      <Tarjeta>
+        <h4 className="text-xl font-black text-slate-900">Título de la página</h4>
+        <p className="mt-2 text-base text-slate-600">
+          Es lo que se lee arriba, y también lo que dice el botón de la portada.
+        </p>
+
+        <div className="mt-6 max-w-2xl">
+          <Campo
+            etiqueta="Título"
+            value={config.titulo}
+            onChange={(e) => setConfig({ ...config, titulo: e.target.value })}
+            placeholder="RESULTADOS DE LA PRIMERA ETAPA INSTITUCIONAL"
+          />
+        </div>
+
+        <div className="mt-6">
+          <Boton
+            cargando={guardando}
+            onClick={() => guardar({ tituloPublico: config.titulo }, 'Título guardado')}
+          >
+            Guardar título
+          </Boton>
+        </div>
+      </Tarjeta>
+
+      <Tarjeta>
+        <div className="flex flex-wrap items-start justify-between gap-5">
+          <div className="flex items-start gap-4">
+            <span
+              className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl ${
+                config.activa ? 'bg-emerald-50' : 'bg-slate-100'
+              }`}
+            >
+              {config.activa ? (
+                <Eye className="h-7 w-7 text-emerald-700" />
+              ) : (
+                <EyeOff className="h-7 w-7 text-slate-500" />
+              )}
+            </span>
+            <div>
+              <h4 className="text-xl font-black text-slate-900">Consulta pública</h4>
+              <p className="mt-1 text-base text-slate-600">
+                Al abrirla, el botón aparece en la portada y la página responde por DNI.
+              </p>
+            </div>
+          </div>
+
+          <Boton
+            variante={config.activa ? 'peligro' : 'exito'}
+            cargando={guardando}
+            onClick={() =>
+              guardar(
+                { consultaActiva: !config.activa },
+                config.activa ? 'Consulta cerrada' : 'Consulta abierta al público',
+              )
+            }
+          >
+            {config.activa ? 'Cerrar la consulta' : 'Abrir la consulta'}
+          </Boton>
+        </div>
+
+        <div className="mt-6">
+          <Aviso tipo={config.activa ? 'exito' : 'info'} compacto>
+            {config.activa ? (
+              <>
+                Abierta en{' '}
+                <a
+                  href="/resultados_etapa_institucional"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="font-bold underline underline-offset-4"
+                >
+                  /resultados_etapa_institucional
+                </a>
+                . Responde por los estudiantes de las dos tandas, los que enviaron sus tutores y
+                los que llenó la comisión.
+              </>
+            ) : (
+              'La página existe pero avisa que la consulta no está habilitada, y el botón no sale en la portada.'
+            )}
+          </Aviso>
+        </div>
+      </Tarjeta>
     </div>
   );
 }

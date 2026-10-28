@@ -20,7 +20,8 @@ import { ArchivoAdministrado, Comunicado, SettingsService, TipoImagen } from './
 import { StorageService } from '../storage/storage.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
-import { Roles } from '../common/decorators';
+import { PermisoGuard } from '../permisos/permiso.guard';
+import { Permiso, Roles } from '../common/decorators';
 
 /**
  * Todo lo que sube la comisión pasa por memoria y de ahí a Cloudflare: nada
@@ -75,7 +76,7 @@ export class SettingsController {
     return this.entregar(this.validarTipo(tipo), res);
   }
 
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard, PermisoGuard)
   @Roles('ADMIN')
   @Post('imagenes/:tipo')
   @UseInterceptors(recibir('imagen'))
@@ -83,7 +84,7 @@ export class SettingsController {
     return this.settings.guardarArchivo(this.validarTipo(tipo), archivo);
   }
 
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard, PermisoGuard)
   @Roles('ADMIN')
   @Delete('imagenes/:tipo')
   quitarImagen(@Param('tipo') tipo: string) {
@@ -106,16 +107,18 @@ export class SettingsController {
     return this.entregar('yape', res);
   }
 
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard, PermisoGuard)
   @Roles('ADMIN', 'SUPERVISOR')
+  @Permiso('ajustes')
   @Post('yape')
   @UseInterceptors(recibir('imagen'))
   guardarYape(@UploadedFile() archivo: Express.Multer.File) {
     return this.settings.guardarArchivo('yape', archivo);
   }
 
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard, PermisoGuard)
   @Roles('ADMIN', 'SUPERVISOR')
+  @Permiso('ajustes')
   @Delete('yape')
   quitarYape() {
     return this.settings.quitarArchivo('yape');
@@ -126,15 +129,17 @@ export class SettingsController {
   // --------------------------------------------------------------------
 
   /** El comunicado completo, publicado o no: para editarlo. */
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard, PermisoGuard)
   @Roles('ADMIN', 'SUPERVISOR')
+  @Permiso('ajustes')
   @Get('comunicado')
   verComunicado() {
     return this.settings.comunicado();
   }
 
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard, PermisoGuard)
   @Roles('ADMIN', 'SUPERVISOR')
+  @Permiso('ajustes')
   @Post('comunicado')
   guardarComunicado(@Body() body: Partial<Comunicado>) {
     return this.settings.guardarComunicado(body);
@@ -149,24 +154,27 @@ export class SettingsController {
     return this.entregar('credencial', res);
   }
 
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard, PermisoGuard)
   @Roles('ADMIN', 'SUPERVISOR')
+  @Permiso('ajustes')
   @Post('credencial')
   @UseInterceptors(recibir('imagen'))
   guardarLogoCredencial(@UploadedFile() archivo: Express.Multer.File) {
     return this.settings.guardarArchivo('credencial', archivo);
   }
 
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard, PermisoGuard)
   @Roles('ADMIN', 'SUPERVISOR')
+  @Permiso('ajustes')
   @Delete('credencial')
   quitarLogoCredencial() {
     return this.settings.quitarArchivo('credencial');
   }
 
   /** Titular y número de la cuenta, lo que acompaña al QR en el paso de pago. */
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard, PermisoGuard)
   @Roles('ADMIN', 'SUPERVISOR')
+  @Permiso('ajustes')
   @Post('yape/datos')
   guardarDatosYape(@Body() body: { numero?: string; titular?: string }) {
     return this.settings.guardarYape(body);
@@ -181,7 +189,7 @@ export class SettingsController {
     return this.entregar('tutorial', res);
   }
 
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard, PermisoGuard)
   @Roles('ADMIN')
   @Post('tutorial')
   @UseInterceptors(recibir('video'))
@@ -189,7 +197,7 @@ export class SettingsController {
     return this.settings.guardarArchivo('tutorial', archivo);
   }
 
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard, PermisoGuard)
   @Roles('ADMIN')
   @Delete('tutorial')
   quitarTutorial() {
@@ -205,7 +213,7 @@ export class SettingsController {
     return this.entregar('bases', res);
   }
 
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard, PermisoGuard)
   @Roles('ADMIN')
   @Post('bases')
   @UseInterceptors(recibir('pdf'))
@@ -213,7 +221,7 @@ export class SettingsController {
     return this.settings.guardarArchivo('bases', archivo);
   }
 
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard, PermisoGuard)
   @Roles('ADMIN')
   @Delete('bases')
   quitarBases() {
@@ -268,23 +276,26 @@ export class SettingsController {
   // --------------------------------------------------------------------
 
   /** Culminar o reabrir el periodo de inscripciones. */
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard, PermisoGuard)
   @Roles('ADMIN', 'SUPERVISOR')
+  @Permiso('ajustes')
   @Post('inscripciones')
   cambiarCierre(@Body() body: { cerradas?: boolean }) {
     return this.settings.cambiarCierre(Boolean(body?.cerradas));
   }
 
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard, PermisoGuard)
   @Roles('ADMIN', 'SUPERVISOR')
+  @Permiso('ajustes')
   @Post('grupos')
   crearGrupo(@Body() body: { nombre: string; enlace?: string }) {
     if (!body?.nombre?.trim()) throw new BadRequestException('Escriba el nombre del grupo');
     return this.settings.crearGrupo(body);
   }
 
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard, PermisoGuard)
   @Roles('ADMIN', 'SUPERVISOR')
+  @Permiso('ajustes')
   @Patch('grupos/:id')
   actualizarGrupo(
     @Param('id') id: string,
@@ -293,23 +304,26 @@ export class SettingsController {
     return this.settings.actualizarGrupo(id, body);
   }
 
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard, PermisoGuard)
   @Roles('ADMIN', 'SUPERVISOR')
+  @Permiso('ajustes')
   @Delete('grupos/:id')
   eliminarGrupo(@Param('id') id: string) {
     return this.settings.eliminarGrupo(id);
   }
 
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard, PermisoGuard)
   @Roles('ADMIN', 'SUPERVISOR')
+  @Permiso('ajustes')
   @Post('bcp')
   guardarBcp(@Body() body: { titular?: string; cuenta?: string; cci?: string }) {
     return this.settings.guardarBcp(body);
   }
 
   /** Botón flotante de WhatsApp de la portada: a qué número y con qué texto. */
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard, PermisoGuard)
   @Roles('ADMIN', 'SUPERVISOR')
+  @Permiso('ajustes')
   @Post('whatsapp')
   guardarWhatsapp(@Body() body: { numero?: string; mensaje?: string }) {
     return this.settings.guardarWhatsapp(body);

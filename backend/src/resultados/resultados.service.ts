@@ -41,10 +41,16 @@ export interface ConfigResultados {
   /** Publicar abre los resultados a los tutores, cada uno en su cuenta. */
   publicado: Record<Ola, boolean>;
   publicadoEn: Record<Ola, string | null>;
-  /** Qué supervisores pueden entrar a esta sección. El admin siempre puede. */
+  /** Legado: hoy los permisos viven en `permisos_supervisores`. Se sigue
+   *  leyendo para arrastrar a quien ya estaba a cargo. */
   encargados: string[];
+  /** La página pública de consulta: se abre aparte de publicar a los tutores. */
+  consultaActiva: boolean;
+  tituloPublico: string;
   actualizado: string;
 }
+
+const TITULO_POR_DEFECTO = 'RESULTADOS DE LA PRIMERA ETAPA INSTITUCIONAL';
 
 const VACIA: ConfigResultados = {
   porcentaje: 30,
@@ -53,6 +59,8 @@ const VACIA: ConfigResultados = {
   publicado: { tutores: false, comision: false },
   publicadoEn: { tutores: null, comision: null },
   encargados: [],
+  consultaActiva: false,
+  tituloPublico: TITULO_POR_DEFECTO,
   actualizado: '',
 };
 
@@ -143,45 +151,60 @@ export class ResultadosService {
     return config;
   }
 
-  /** Los supervisores del equipo, marcando a los que están a cargo. */
-  async encargados() {
-    const [config, supervisores] = await Promise.all([
-      this.config(),
-      this.prisma.admin.findMany({
-        where: { rol: 'SUPERVISOR' },
-        orderBy: { createdAt: 'asc' },
-        select: { id: true, nombre: true, correo: true },
-      }),
-    ]);
+  /** El título de la página pública y si la consulta está abierta. */
+  async guardarAjustes(datos: { tituloPublico?: string; consultaActiva?: boolean }) {
+    const config = await this.config();
 
-    return supervisores.map((s) => ({ ...s, aCargo: config.encargados.includes(s.id) }));
-  }
-
-  async cambiarEncargado(id: string, aCargo: boolean) {
-    const supervisor = await this.prisma.admin.findUnique({ where: { id } });
-    if (!supervisor || supervisor.rol !== 'SUPERVISOR') {
-      throw new NotFoundException('Ese supervisor no existe');
+    if (datos.tituloPublico !== undefined) {
+      config.tituloPublico = String(datos.tituloPublico).trim().slice(0, 120) || TITULO_POR_DEFECTO;
+    }
+    if (datos.consultaActiva !== undefined) {
+      config.consultaActiva = Boolean(datos.consultaActiva);
     }
 
-    const config = await this.config();
-    config.encargados = aCargo
-      ? [...new Set([...config.encargados, id])]
-      : config.encargados.filter((x) => x !== id);
-
     await this.guardar(config);
-    this.log.warn(
-      `${supervisor.nombre} ${aCargo ? 'queda a cargo de' : 'sale de'} los resultados.`,
-    );
-    return this.encargados();
+    return { tituloPublico: config.tituloPublico, consultaActiva: config.consultaActiva };
   }
 
-  /** Lo que pregunta el panel para saber si muestra la sección. */
-  async puedeEntrar(usuario: { sub: string; rol: string }) {
-    if (usuario.rol === 'ADMIN') return { puede: true };
-    if (usuario.rol !== 'SUPERVISOR') return { puede: false };
+  /** Lo que necesita la página pública antes de buscar nada. */
+  async estadoPublico() {
+    const { consultaActiva, tituloPublico } = await this.config();
+    return { activa: consultaActiva, titulo: tituloPublico };
+  }
 
-    const { encargados } = await this.config();
-    return { puede: encargados.includes(usuario.sub) };
+  /**
+   * La consulta por DNI de la página pública.
+   *
+   * Va sobre todo lo corregido, de las dos tandas: quien busca su resultado
+   * no tiene por qué saber si su tutor lo subió o lo hizo la comisión. Lo
+   * único que la habilita es el interruptor de la comisión.
+   */
+  async consultar(dni: string) {
+    const { resultados, config } = await this.calcular();
+
+    if (!config.consultaActiva) {
+      throw new NotFoundException('La consulta de resultados todavía no está habilitada.');
+    }
+
+    const limpio = String(dni || '').trim();
+    if (!/^\d{6,12}$/.test(limpio)) {
+      throw new BadRequestException('Escriba el DNI del estudiante, solo números');
+    }
+
+    const suyos = resultados.filter((r) => r.dni === limpio);
+    if (suyos.length === 0) {
+      throw new NotFoundException('No encontramos ese DNI entre los estudiantes evaluados.');
+    }
+
+    return suyos.map((r) => ({
+      nombres: r.nombres,
+      dni: r.dni,
+      institucion: r.institucion,
+      categoria: r.categoria,
+      grado: GRADOS.find((g) => g.categoria === r.categoria)?.label || '',
+      puntaje: r.puntaje,
+      clasifica: r.estado === 'CLASIFICA',
+    }));
   }
 
   // ----------------------------------------------------------------- el cálculo
@@ -644,6 +667,56 @@ export class ResultadosService {
         };
       })
       .sort((a, b) => a.institucion.localeCompare(b.institucion, 'es'));
+  }
+
+  /**
+   * Buscar un estudiante por lo que sea, para decidir su caso a mano.
+   *
+   * A diferencia de la consulta para los tutores, aquí entra todo, publicado
+   * o no: es la herramienta con la que se arma la clasificación, no la que
+   * se usa para informarla.
+   */
+  async buscarAlumnos(texto: string) {
+    const termino = sinTildes(texto);
+    if (termino.length < 2) {
+      throw new BadRequestException('Escriba al menos dos letras, o el DNI');
+    }
+
+    const { resultados } = await this.calcular();
+    const coinciden = resultados.filter((r) =>
+      sinTildes(`${r.nombres} ${r.dni} ${r.institucion} ${r.tutor}`).includes(termino),
+    );
+
+    const TOPE = 100;
+    return {
+      total: coinciden.length,
+      // Con un término muy corto salen cientos: se muestra el principio y se
+      // avisa, en vez de mandar toda la base al navegador.
+      recortado: coinciden.length > TOPE,
+      alumnos: coinciden
+        .sort(
+          (a, b) =>
+            a.institucion.localeCompare(b.institucion, 'es') ||
+            a.categoria.localeCompare(b.categoria) ||
+            a.puesto - b.puesto,
+        )
+        .slice(0, TOPE)
+        .map((r) => ({
+          clave: r.clave,
+          nombres: r.nombres,
+          dni: r.dni,
+          categoria: r.categoria,
+          institucion: r.institucion,
+          tutor: r.tutor,
+          compitioEn: r.grupoNombre !== r.institucion ? r.grupoNombre : null,
+          puntaje: r.puntaje,
+          puesto: r.puesto,
+          estado: r.estado,
+          manual: r.manual,
+          empatado: r.empatado,
+          ola: r.ola,
+        })),
+    };
   }
 
   /** El Excel de una sola delegación, para mandárselo a su tutor. */

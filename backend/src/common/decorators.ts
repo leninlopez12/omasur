@@ -21,3 +21,13 @@ export interface JwtUser {
 export const CurrentUser = createParamDecorator((_data: unknown, ctx: ExecutionContext): JwtUser => {
   return ctx.switchToHttp().getRequest().user;
 });
+
+export const PERMISO_KEY = 'permiso';
+/**
+ * Qué módulo del panel cubre esta ruta.
+ *
+ * Solo aplica a los supervisores: el administrador pasa siempre y los tutores
+ * ya están filtrados por su rol. Si una pantalla se arma con varias rutas, se
+ * listan los módulos que la usan y basta tener uno.
+ */
+export const Permiso = (...permisos: string[]) => SetMetadata(PERMISO_KEY, permisos);

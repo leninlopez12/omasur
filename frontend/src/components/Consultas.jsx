@@ -162,7 +162,7 @@ export function ConsultaEstudiantes() {
   const bajarCredencial = async (alumno) => {
     setBajando(alumno.id);
     try {
-      await descargar(`/credenciales/dni/${alumno.dni}`, `credencial-${alumno.dni}.pdf`);
+      await descargar(`/credenciales/comision/${alumno.dni}`, `credencial-${alumno.dni}.pdf`);
     } finally {
       setBajando('');
     }
