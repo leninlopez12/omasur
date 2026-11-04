@@ -13,6 +13,7 @@ export const PERMISOS_RESULTADOS = [
   'resultados-comision',
   'resultados-decidir',
   'resultados-general',
+  'resultados-clasificados',
   'resultados-consultar',
   'resultados-encargados',
   'resultados-publica',

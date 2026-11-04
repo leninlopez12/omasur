@@ -17,10 +17,17 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { PermisoGuard } from '../permisos/permiso.guard';
 import { CurrentUser, JwtUser, Permiso, Roles } from '../common/decorators';
+import { GRADOS } from '../common/grados';
 
 /** Cada pantalla trabaja una tanda; sin `ola` se ven las dos juntas. */
 function tanda(valor?: string): Ola | undefined {
   return valor === 'tutores' || valor === 'comision' ? valor : undefined;
+}
+
+/** La categoría llega de la barra de direcciones: lo que no es A-I se ignora. */
+function categoriaValida(valor?: string): string | undefined {
+  const limpia = String(valor || '').trim().toUpperCase();
+  return GRADOS.some((g) => g.categoria === limpia) ? limpia : undefined;
 }
 
 /**
@@ -84,6 +91,22 @@ export class ResultadosController {
   @Get('general')
   general() {
     return this.resultados.general();
+  }
+
+  /** Los tutores que llevan gente a la final, para convocarlos. */
+  @Comision('resultados-clasificados')
+  @Get('tutores-clasificados')
+  tutoresClasificados(@Query('categoria') categoria?: string) {
+    return this.resultados.tutoresClasificados(categoriaValida(categoria));
+  }
+
+  @Comision('resultados-clasificados')
+  @Get('tutores-clasificados/excel')
+  async excelTutores(@Query('categoria') categoria: string, @Res() res: Response) {
+    const { buffer, nombre } = await this.resultados.excelTutoresClasificados(
+      categoriaValida(categoria),
+    );
+    this.enviarExcel(res, buffer, nombre);
   }
 
   /** De las dos tandas: los sueltos se trabajan en un solo lugar. */

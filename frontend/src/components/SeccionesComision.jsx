@@ -12,6 +12,7 @@ import {
   LayoutDashboard,
   LogIn,
   Mail,
+  Medal,
   Megaphone,
   MessageCircle,
   PencilLine,
@@ -49,6 +50,7 @@ import Comunicados from './Comunicados.jsx';
 import CredencialesComision from './CredencialesComision.jsx';
 import Tablero from './Tablero.jsx';
 import PermisosSupervisores from './PermisosSupervisores.jsx';
+import TutoresClasificados from './TutoresClasificados.jsx';
 import {
   ConsultaPublica,
   ConsultarResultados,
@@ -98,6 +100,12 @@ export const SECCION_RESULTADOS = {
       texto: 'General y publicación',
       icono: Award,
       permiso: 'resultados-general',
+    },
+    {
+      id: 'resultados-clasificados',
+      texto: 'Tutores clasificados',
+      icono: Medal,
+      permiso: 'resultados-clasificados',
     },
     {
       id: 'resultados-consultar',
@@ -181,6 +189,7 @@ export const TITULOS_COMISION = {
   'resultados-comision': 'Resultados · Llenadas por la comisión',
   'resultados-decidir': 'Resultados · Decidir a mano',
   'resultados-general': 'Resultados · General y publicación',
+  'resultados-clasificados': 'Resultados · Tutores clasificados',
   'resultados-consultar': 'Resultados · Consultar y descargar',
   'resultados-encargados': 'Resultados · Supervisor a cargo',
   'resultados-publica': 'Resultados · Hacer pública la consulta',
@@ -250,6 +259,7 @@ export function ContenidoComision({ seccion, detalleId, setDetalleId, irA, abrir
       {seccion === 'resultados-comision' && <ModuloResultados ola="comision" />}
       {seccion === 'resultados-decidir' && <DecidirAlumnos />}
       {seccion === 'resultados-general' && <ResultadosGeneral />}
+      {seccion === 'resultados-clasificados' && <TutoresClasificados />}
       {seccion === 'resultados-consultar' && <ConsultarResultados />}
       {seccion === 'resultados-encargados' && <PermisosSupervisores />}
       {seccion === 'resultados-publica' && <ConsultaPublica />}

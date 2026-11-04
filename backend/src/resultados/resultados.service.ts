@@ -88,6 +88,38 @@ export interface Resultado extends Alumno {
   empatado: boolean;
 }
 
+/** La ficha de inscripción del tutor, que es de donde salen sus datos. */
+interface FichaTutor {
+  id: string;
+  dni: string | null;
+  nombres: string;
+  apellidos: string;
+  celular: string;
+  correo: string;
+  institucion: string;
+  modalidad: string;
+  region: string;
+  provincia: string;
+  distrito: string;
+}
+
+/** Un tutor que lleva gente a la final, con lo que hace falta para llamarlo. */
+interface TutorClasificado {
+  tutorId: string;
+  nombres: string;
+  dni: string;
+  celular: string;
+  correo: string;
+  institucion: string;
+  modalidad: string;
+  region: string;
+  provincia: string;
+  distrito: string;
+  categorias: string[];
+  clasificados: number;
+  alumnos: { dni: string; nombres: string; categoria: string; puntaje: number }[];
+}
+
 /**
  * Resultados de la etapa institucional.
  *
@@ -868,6 +900,263 @@ export class ResultadosService {
       ),
     };
   }
+
+  // ------------------------------------------------------ tutores clasificados
+
+  /**
+   * Los clasificados con la ficha de su tutor al lado.
+   *
+   * `calcular()` vuelve a leer todas las entregas del examen, así que se llama
+   * una sola vez y de aquí salen tanto la pantalla como el Excel.
+   */
+  private async baseClasificados() {
+    const { resultados, config } = await this.calcular();
+    const clasificados = resultados.filter((r) => r.estado === 'CLASIFICA');
+
+    const fichas = await this.prisma.tutor.findMany({
+      where: { id: { in: [...new Set(clasificados.map((r) => r.tutorId))] } },
+      select: {
+        id: true,
+        dni: true,
+        nombres: true,
+        apellidos: true,
+        celular: true,
+        correo: true,
+        institucion: true,
+        modalidad: true,
+        region: true,
+        provincia: true,
+        distrito: true,
+      },
+    });
+
+    return {
+      clasificados,
+      config,
+      fichas: new Map(fichas.map((t) => [t.id, t])),
+      // Mientras queden empates o casos en evaluación la lista todavía puede
+      // cambiar: la pantalla lo avisa antes de que alguien la reparta.
+      pendientes: resultados.filter(
+        (r) => r.estado === 'EMPATE' || r.estado === 'EN_EVALUACION',
+      ).length,
+    };
+  }
+
+  /**
+   * Un tutor por fila, aunque lleve clasificados en varias categorías.
+   *
+   * Los datos salen de su ficha de inscripción y no del Excel del examen: es
+   * lo que él mismo declaró y lo que vale para convocarlo. La institución del
+   * examen, además, puede venir de una agrupación y no identificar a nadie.
+   */
+  private agruparTutores(lista: Resultado[], fichas: Map<string, FichaTutor>) {
+    const tutores = new Map<string, TutorClasificado>();
+
+    for (const r of lista) {
+      if (!tutores.has(r.tutorId)) {
+        const ficha = fichas.get(r.tutorId);
+        tutores.set(r.tutorId, {
+          tutorId: r.tutorId,
+          nombres: ficha ? `${ficha.nombres} ${ficha.apellidos}`.trim() : r.tutor,
+          dni: ficha?.dni || '',
+          celular: ficha?.celular || r.celular,
+          correo: ficha?.correo || '',
+          institucion: ficha?.institucion || r.institucion,
+          modalidad: ficha?.modalidad || '',
+          region: ficha?.region || '',
+          provincia: ficha?.provincia || '',
+          distrito: ficha?.distrito || '',
+          categorias: [],
+          clasificados: 0,
+          alumnos: [],
+        });
+      }
+
+      const t = tutores.get(r.tutorId);
+      t.clasificados += 1;
+      if (!t.categorias.includes(r.categoria)) t.categorias.push(r.categoria);
+      t.alumnos.push({
+        dni: r.dni,
+        nombres: r.nombres,
+        categoria: r.categoria,
+        puntaje: r.puntaje,
+      });
+    }
+
+    return [...tutores.values()]
+      .map((t) => ({
+        ...t,
+        categorias: [...t.categorias].sort(),
+        alumnos: [...t.alumnos].sort(
+          (a, b) =>
+            a.categoria.localeCompare(b.categoria) ||
+            b.puntaje - a.puntaje ||
+            a.nombres.localeCompare(b.nombres, 'es'),
+        ),
+      }))
+      .sort(
+        (a, b) =>
+          a.institucion.localeCompare(b.institucion, 'es') ||
+          a.nombres.localeCompare(b.nombres, 'es'),
+      );
+  }
+
+  /** El selector de la pantalla y las hojas del Excel salen de aquí. */
+  private categoriasDe(clasificados: Resultado[]) {
+    return [...new Set(clasificados.map((r) => r.categoria))].sort().map((categoria) => {
+      const suyos = clasificados.filter((r) => r.categoria === categoria);
+      return {
+        categoria,
+        grado: GRADOS.find((g) => g.categoria === categoria)?.label || '',
+        clasificados: suyos.length,
+        tutores: new Set(suyos.map((r) => r.tutorId)).size,
+      };
+    });
+  }
+
+  /**
+   * Resultados · Tutores clasificados.
+   *
+   * La etapa institucional la corre cada delegación por su cuenta; esta es la
+   * lista que hace falta después, para convocar a la final macrorregional:
+   * quién viaja, de qué institución y a qué número se le llama.
+   */
+  async tutoresClasificados(categoria?: string) {
+    const { clasificados, fichas, config, pendientes } = await this.baseClasificados();
+    const deLaCategoria = categoria
+      ? clasificados.filter((r) => r.categoria === categoria)
+      : clasificados;
+
+    const tutores = this.agruparTutores(deLaCategoria, fichas);
+
+    return {
+      tutores,
+      // Las categorías salen de todos los clasificados y no de la elegida: el
+      // selector tiene que seguir ofreciendo las demás.
+      categorias: this.categoriasDe(clasificados),
+      resumen: {
+        tutores: tutores.length,
+        clasificados: deLaCategoria.length,
+        pendientes,
+        publicado: config.publicado.tutores && config.publicado.comision,
+      },
+    };
+  }
+
+  /**
+   * El Excel de los tutores clasificados.
+   *
+   * Con categoría sale una sola hoja. Sin ella, la primera hoja es la lista de
+   * convocatoria —cada tutor una vez, con las categorías que lleva— y detrás
+   * van las de cada categoría, que es como se reparte el trabajo del día.
+   */
+  async excelTutoresClasificados(
+    categoria?: string,
+  ): Promise<{ buffer: Buffer; nombre: string }> {
+    const { clasificados, fichas, config, pendientes } = await this.baseClasificados();
+    const categorias = this.categoriasDe(clasificados);
+
+    if (categoria && !categorias.some((c) => c.categoria === categoria)) {
+      throw new NotFoundException(
+        `Todavía no hay tutores clasificados en la categoría ${categoria}`,
+      );
+    }
+
+    const libro = new ExcelJS.Workbook();
+    libro.creator = 'I OMASUR UNI 2026';
+
+    const abierto = config.publicado.tutores && config.publicado.comision;
+    const nota =
+      'Clasificados a la final macrorregional' +
+      (pendientes > 0 ? ` · ${pendientes} caso(s) sin resolver` : '') +
+      (abierto ? '' : ' · todavía sin publicar a los tutores');
+
+    if (!categoria) {
+      this.hojaTutores(
+        libro,
+        'TODOS',
+        'Tutores clasificados · todas las categorías',
+        nota,
+        this.agruparTutores(clasificados, fichas),
+        true,
+      );
+    }
+
+    const hojas = categoria ? categorias.filter((c) => c.categoria === categoria) : categorias;
+    for (const c of hojas) {
+      this.hojaTutores(
+        libro,
+        `CAT. ${c.categoria}`,
+        `Tutores clasificados · CAT. ${c.categoria} · ${c.grado}`,
+        nota,
+        this.agruparTutores(
+          clasificados.filter((r) => r.categoria === c.categoria),
+          fichas,
+        ),
+        false,
+      );
+    }
+
+    if (categorias.length === 0) {
+      libro.addWorksheet('Sin datos').getCell('A1').value =
+        'Todavía no hay tutores con estudiantes clasificados.';
+    }
+
+    return {
+      buffer: (await libro.xlsx.writeBuffer()) as unknown as Buffer,
+      nombre: nombreArchivo('tutores-clasificados' + (categoria ? `-cat-${categoria}` : '')),
+    };
+  }
+
+  private hojaTutores(
+    libro: ExcelJS.Workbook,
+    nombre: string,
+    titulo: string,
+    nota: string,
+    tutores: TutorClasificado[],
+    conCategorias: boolean,
+  ) {
+    const hoja = libro.addWorksheet(nombre);
+
+    const columnas = [
+      { header: 'N°', width: 6 },
+      { header: 'APELLIDOS Y NOMBRES', width: 34 },
+      { header: 'DNI', width: 14 },
+      { header: 'INSTITUCIÓN EDUCATIVA', width: 40 },
+      { header: 'TIPO', width: 18 },
+      { header: 'CELULAR', width: 14 },
+      { header: 'CORREO', width: 30 },
+      { header: 'REGIÓN', width: 18 },
+      { header: 'PROVINCIA', width: 18 },
+      { header: 'DISTRITO', width: 18 },
+      ...(conCategorias ? [{ header: 'CATEGORÍAS', width: 18 }] : []),
+      { header: 'CLASIFICADOS', width: 14 },
+    ];
+
+    escribirTitulo(hoja, columnas.length, titulo, nota, tutores.length);
+    escribirEncabezados(hoja, columnas);
+
+    tutores.forEach((t, i) => {
+      const fila = hoja.addRow([
+        i + 1,
+        t.nombres,
+        t.dni,
+        t.institucion,
+        MODALIDAD[t.modalidad] || t.modalidad,
+        t.celular,
+        t.correo,
+        t.region,
+        t.provincia,
+        t.distrito,
+        ...(conCategorias ? [t.categorias.join(', ')] : []),
+        t.clasificados,
+      ]);
+      // DNI y celular son texto: con un cero delante Excel los destroza.
+      fila.getCell(3).numFmt = '@';
+      fila.getCell(6).numFmt = '@';
+      fila.getCell(columnas.length).font = { bold: true, color: { argb: GRANATE } };
+    });
+  }
 }
 
 const ETIQUETAS: Record<EstadoResultado, string> = {
@@ -882,4 +1171,11 @@ const COLOR_ESTADO: Record<EstadoResultado, string> = {
   NO_CLASIFICA: 'FF6B7280',
   EN_EVALUACION: 'FFB91C1C',
   EMPATE: 'FFB45309',
+};
+
+/** Como se lee la modalidad en el Excel de los tutores. */
+const MODALIDAD: Record<string, string> = {
+  ESTATAL: 'Estatal',
+  PARTICULAR: 'Particular',
+  GRUPO_ESTUDIO: 'Grupo de estudio',
 };

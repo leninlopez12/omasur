@@ -31,6 +31,12 @@ export const PERMISOS_RESULTADOS = [
     detalle: 'El consolidado de las dos tandas y su publicación.',
   },
   {
+    id: 'resultados-clasificados',
+    texto: 'Tutores clasificados',
+    detalle: 'Los tutores que llevan gente a la final, con sus datos de contacto.',
+    aviso: 'Trae DNI, celular y correo de los tutores.',
+  },
+  {
     id: 'resultados-consultar',
     texto: 'Consultar y descargar',
     detalle: 'Buscar por institución, tutor o DNI y bajar el Excel.',
