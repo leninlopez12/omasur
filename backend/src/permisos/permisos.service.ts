@@ -1,14 +1,20 @@
 import { ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { JwtUser } from '../common/decorators';
-import { limpiarPermisos, Permiso, PERMISOS_RESULTADOS, tocaResultados } from './permisos';
+import {
+  limpiarPermisos,
+  Permiso,
+  PERMISOS_EXAMEN,
+  PERMISOS_RESULTADOS,
+  tocaResultados,
+} from './permisos';
 
 const CLAVE = 'permisos_supervisores';
 /** De aquí se arrastra la lista vieja, de cuando el cargo era todo o nada. */
 const CLAVE_RESULTADOS = 'resultados_config';
 
 /** Lo que podía todo supervisor antes de que los permisos existieran. */
-const HEREDADOS: Permiso[] = ['examen'];
+const HEREDADOS: Permiso[] = [...PERMISOS_EXAMEN];
 
 type Mapa = Record<string, Permiso[]>;
 

@@ -2,10 +2,10 @@ import { useEffect, useState } from 'react';
 import { AlertCircle, CheckCircle2, ShieldAlert, UserCog } from 'lucide-react';
 import { Aviso, Boton, Cargando, Etiqueta, Tarjeta } from './Ui.jsx';
 import { api, mensajeError } from '../lib/api';
-import { PERMISOS_COMISION, PERMISOS_FINAL, PERMISOS_RESULTADOS } from '../lib/permisos';
+import { GRUPOS_PERMISOS } from '../lib/permisos';
 
 /**
- * Resultados · Supervisor a cargo.
+ * Supervisores · Permisos.
  *
  * El panel del supervisor no es uno solo: se arma con lo que tenga marcado
  * aquí. Lo que no esté marcado no le aparece en el sidebar y el servidor
@@ -79,7 +79,7 @@ export default function PermisosSupervisores() {
       setMensaje(
         cuantos === 0
           ? `${supervisor.nombre} se queda sin acceso al panel.`
-          : `${supervisor.nombre}: ${cuantos} ${cuantos === 1 ? 'módulo' : 'módulos'} en su panel.`,
+          : `${supervisor.nombre}: ${cuantos} ${cuantos === 1 ? 'pantalla' : 'pantallas'} en su panel.`,
       );
     } catch (e) {
       setError(mensajeError(e, 'No se pudieron guardar los permisos'));
@@ -98,9 +98,9 @@ export default function PermisosSupervisores() {
             <UserCog className="h-8 w-8 text-granate-600" />
           </span>
           <div>
-            <h3 className="text-3xl font-black text-slate-900">Supervisor a cargo</h3>
+            <h3 className="text-3xl font-black text-slate-900">Permisos</h3>
             <p className="mt-2 text-xl text-slate-600">
-              Marque qué módulos le aparecen a cada supervisor en su panel. Lo que no marque no lo
+              Marque pantalla por pantalla qué ve cada supervisor en su panel. Lo que no marque no lo
               verá ni podrá usar.
             </p>
           </div>
@@ -175,36 +175,21 @@ function Supervisor({ supervisor, marcados, guardando, alMarcar, alMarcarGrupo, 
         >
           {marcados.length === 0
             ? 'Sin acceso'
-            : `${marcados.length} ${marcados.length === 1 ? 'módulo' : 'módulos'}`}
+            : `${marcados.length} ${marcados.length === 1 ? 'pantalla' : 'pantallas'}`}
         </Etiqueta>
       </div>
 
-      <Grupo
-        titulo="Final macrorregional"
-        descripcion="El día del examen presencial."
-        permisos={PERMISOS_FINAL}
-        marcados={marcados}
-        alMarcar={alMarcar}
-        alMarcarTodo={(valor) => alMarcarGrupo(PERMISOS_FINAL, valor)}
-      />
-
-      <Grupo
-        titulo="Resultados"
-        descripcion="La clasificación y su publicación."
-        permisos={PERMISOS_RESULTADOS}
-        marcados={marcados}
-        alMarcar={alMarcar}
-        alMarcarTodo={(valor) => alMarcarGrupo(PERMISOS_RESULTADOS, valor)}
-      />
-
-      <Grupo
-        titulo="Resto del panel"
-        descripcion="Las mismas pantallas del administrador."
-        permisos={PERMISOS_COMISION}
-        marcados={marcados}
-        alMarcar={alMarcar}
-        alMarcarTodo={(valor) => alMarcarGrupo(PERMISOS_COMISION, valor)}
-      />
+      {GRUPOS_PERMISOS.map((g) => (
+        <Grupo
+          key={g.titulo}
+          titulo={g.titulo}
+          descripcion={g.descripcion}
+          permisos={g.permisos}
+          marcados={marcados}
+          alMarcar={alMarcar}
+          alMarcarTodo={(valor) => alMarcarGrupo(g.permisos, valor)}
+        />
+      ))}
 
       <div className="mt-8 flex flex-wrap items-center gap-4 border-t-2 border-slate-100 pt-6">
         <Boton

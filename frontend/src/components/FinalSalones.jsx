@@ -148,8 +148,8 @@ export default function FinalSalones() {
           El día
         </h4>
         <p className="mt-2 text-base text-slate-600">
-          Secundaria rinde primero y primaria después, en las mismas aulas. Por eso los dos turnos
-          numeran desde el mismo primer salón.
+          Secundaria rinde primero y primaria después. Cada turno numera desde su propio salón, así
+          el número ya dice de qué turno es sin mirar nada más.
         </p>
 
         <div className="mt-6 grid gap-5 sm:grid-cols-2">
@@ -191,20 +191,28 @@ export default function FinalSalones() {
           ))}
         </div>
 
-        <div className="mt-5 grid gap-5 sm:grid-cols-2">
+        <div className="mt-5 grid gap-5 sm:grid-cols-3">
           <Campo
             etiqueta="Alumnos por salón"
             type="number"
             value={borrador.capacidad}
             onChange={(e) => setBorrador({ ...borrador, capacidad: e.target.value })}
           />
-          <Campo
-            etiqueta="Primer salón de cada turno"
-            type="number"
-            ayuda="De ahí para arriba, uno por uno, en los dos turnos."
-            value={borrador.primerSalon}
-            onChange={(e) => setBorrador({ ...borrador, primerSalon: e.target.value })}
-          />
+          {NIVELES.map((nivel) => (
+            <Campo
+              key={nivel}
+              etiqueta={`Primer salón de ${NIVEL[nivel].toLowerCase()}`}
+              type="number"
+              ayuda="De ahí para arriba, uno por uno."
+              value={borrador.primerSalon[nivel]}
+              onChange={(e) =>
+                setBorrador({
+                  ...borrador,
+                  primerSalon: { ...borrador.primerSalon, [nivel]: e.target.value },
+                })
+              }
+            />
+          ))}
         </div>
 
         <div className="mt-6">

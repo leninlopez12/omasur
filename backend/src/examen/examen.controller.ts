@@ -81,7 +81,7 @@ export class ExamenController {
   // -------------------------------------------------------- comisión · tablero
 
   @Roles('ADMIN', 'SUPERVISOR')
-  @Permiso('examen')
+  @Permiso('examen-llenar', 'examen-entregas', 'examen-consultas', 'examen-consolidado', 'examen-enviadas', 'examen-prueba', 'examen-clave')
   @Get('config')
   config() {
     return this.examen.config();
@@ -94,21 +94,21 @@ export class ExamenController {
   }
 
   @Roles('ADMIN', 'SUPERVISOR')
-  @Permiso('examen')
+  @Permiso('examen-entregas', 'examen-consultas', 'examen-consolidado', 'examen-enviadas')
   @Get('entregas')
   entregas() {
     return this.examen.entregas();
   }
 
   @Roles('ADMIN', 'SUPERVISOR')
-  @Permiso('examen')
+  @Permiso('examen-consultas')
   @Get('consultas')
   consultas() {
     return this.examen.consultas();
   }
 
   @Roles('ADMIN', 'SUPERVISOR')
-  @Permiso('examen')
+  @Permiso('examen-consultas')
   @Get('consultas/excel')
   async consultasExcel(@Res() res: Response) {
     const { buffer, nombre } = await this.examen.consultasExcel();
@@ -116,14 +116,14 @@ export class ExamenController {
   }
 
   @Roles('ADMIN', 'SUPERVISOR')
-  @Permiso('examen')
+  @Permiso('examen-consolidado')
   @Get('consolidado')
   consolidado() {
     return this.examen.consolidado();
   }
 
   @Roles('ADMIN', 'SUPERVISOR')
-  @Permiso('examen')
+  @Permiso('examen-consolidado')
   @Get('consolidado/excel')
   async consolidadoExcel(@Res() res: Response) {
     const { buffer, nombre } = await this.examen.consolidadoExcel();
@@ -132,7 +132,7 @@ export class ExamenController {
 
   /** La plantilla de una delegación: para ensayar o para llenarla por ella. */
   @Roles('ADMIN', 'SUPERVISOR')
-  @Permiso('examen')
+  @Permiso('examen-llenar', 'examen-prueba')
   @Get('plantilla/:tutorId')
   async plantillaDe(@Param('tutorId') tutorId: string, @Res() res: Response) {
     const { buffer, nombre } = await this.examen.plantilla(tutorId);
@@ -144,7 +144,7 @@ export class ExamenController {
    * ve cómo quedaría corregido, sin guardar nada ni habilitar a nadie.
    */
   @Roles('ADMIN', 'SUPERVISOR')
-  @Permiso('examen')
+  @Permiso('examen-prueba')
   @Post('probar')
   @UseInterceptors(RECIBIR)
   probar(@Query('tutorId') tutorId: string, @UploadedFile() archivo: Express.Multer.File) {
@@ -155,7 +155,7 @@ export class ExamenController {
 
   /** La revisión previa del archivo que la comisión sube por una delegación. */
   @Roles('ADMIN', 'SUPERVISOR')
-  @Permiso('examen')
+  @Permiso('examen-llenar')
   @Post('revisar/:tutorId')
   @UseInterceptors(RECIBIR)
   revisarDe(@Param('tutorId') tutorId: string, @UploadedFile() archivo: Express.Multer.File) {
@@ -164,7 +164,7 @@ export class ExamenController {
 
   /** Llenar por la delegación que no pudo hacerlo sola. */
   @Roles('ADMIN', 'SUPERVISOR')
-  @Permiso('examen')
+  @Permiso('examen-llenar')
   @Post('enviar/:tutorId')
   @UseInterceptors(RECIBIR)
   enviarPor(
@@ -179,7 +179,7 @@ export class ExamenController {
   }
 
   @Roles('ADMIN', 'SUPERVISOR')
-  @Permiso('examen')
+  @Permiso('examen-entregas', 'examen-enviadas')
   @Get('entregas/:tutorId')
   entrega(@Param('tutorId') tutorId: string) {
     return this.examen.entregaCompleta(tutorId);
@@ -187,7 +187,7 @@ export class ExamenController {
 
   /** Lo que envió una delegación, en Excel. Con o sin clave y puntaje. */
   @Roles('ADMIN', 'SUPERVISOR')
-  @Permiso('examen')
+  @Permiso('examen-enviadas')
   @Get('entregas/:tutorId/excel')
   async entregaExcel(
     @Param('tutorId') tutorId: string,

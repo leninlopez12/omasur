@@ -47,12 +47,14 @@ import {
   ContenidoComision,
   SECCIONES_PANEL,
   SECCION_RESULTADOS,
+  SECCION_SUPERVISORES,
   TITULOS_COMISION,
 } from '../components/SeccionesComision.jsx';
 import FinalSalones from '../components/FinalSalones.jsx';
 import FinalReparto from '../components/FinalReparto.jsx';
 import FinalCredenciales from '../components/FinalCredenciales.jsx';
 import FinalListas from '../components/FinalListas.jsx';
+import FinalBusquedaCredenciales from '../components/FinalBusquedaCredenciales.jsx';
 import {
   FinalExamenClave,
   FinalExamenEnvios,
@@ -116,6 +118,7 @@ const SECCION_EXAMEN_FINAL = {
     { id: 'final-llenar', texto: 'Llenar por salón', icono: Upload },
     { id: 'final-envios', texto: 'Consulta de envíos', icono: Inbox },
     { id: 'final-credenciales', texto: 'Credenciales', icono: IdCard },
+    { id: 'final-busqueda', texto: 'Búsqueda de credenciales', icono: Search },
   ],
 };
 
@@ -137,7 +140,7 @@ const SECCIONES = [
   SECCION_RESULTADOS_FINAL,
   SECCION_RESULTADOS,
   SECCION_EXAMEN,
-  ...SECCIONES_PANEL,
+  ...SECCIONES_PANEL, SECCION_SUPERVISORES,
 ];
 
 const TITULOS = {
@@ -150,6 +153,7 @@ const TITULOS = {
   'final-llenar': 'Final · Llenar por salón',
   'final-envios': 'Final · Consulta de envíos',
   'final-credenciales': 'Final · Credenciales de finalistas',
+  'final-busqueda': 'Final · Búsqueda de credenciales',
   'final-general': 'Final · General',
   'final-top': 'Final · Por categoría',
   'final-premiacion': 'Final · Premiación',
@@ -216,6 +220,7 @@ function Contenido() {
       {seccion === 'final-llenar' && <FinalExamenLlenar />}
       {seccion === 'final-envios' && <FinalExamenEnvios />}
       {seccion === 'final-credenciales' && <FinalCredenciales />}
+      {seccion === 'final-busqueda' && <FinalBusquedaCredenciales />}
 
       {seccion === 'final-general' && <FinalResultadosGeneral />}
       {seccion === 'final-top' && <FinalResultadosTop />}

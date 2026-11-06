@@ -1,9 +1,15 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import PDFDocument = require('pdfkit');
 import { PrismaService } from '../prisma/prisma.service';
 import { FinalService, NivelFinal } from './final.service';
 import { EtapasService } from '../credentials/etapas.service';
 import { StorageService } from '../storage/storage.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { GRADOS } from '../common/grados';
 
 const GRANATE = '#7B1E2B';
@@ -56,11 +62,14 @@ export interface Finalista {
  */
 @Injectable()
 export class CredencialFinalService {
+  private readonly log = new Logger('CredencialFinal');
+
   constructor(
     private prisma: PrismaService,
     private final: FinalService,
     private etapas: EtapasService,
     private almacenamiento: StorageService,
+    private notificaciones: NotificationsService,
   ) {}
 
   // ------------------------------------------------------------- el interruptor
@@ -155,8 +164,8 @@ export class CredencialFinalService {
     return { ...suyo, nivelTexto: NIVEL_TEXTO[suyo.nivel], sede, fecha };
   }
 
-  async pdfPorDni(dni: string): Promise<Buffer> {
-    await this.comprobarAbierta();
+  async pdfPorDni(dni: string, publica = true): Promise<Buffer> {
+    if (publica) await this.comprobarAbierta();
 
     const suyo = (await this.finalistas()).find((f) => f.dni === String(dni).trim());
     if (!suyo) throw new NotFoundException('Ese DNI no figura entre los finalistas');
@@ -194,6 +203,98 @@ export class CredencialFinalService {
     return this.construir(lista);
   }
 
+  /**
+   * Buscar finalistas por institución, tutor, nombre o DNI.
+   *
+   * Es para atender al que llama: casi siempre un tutor que no puede entrar a
+   * su cuenta, o un padre que pregunta por un alumno suelto. Se devuelve
+   * agrupado por delegación, que es como se entrega.
+   */
+  async buscar(texto: string) {
+    const termino = sinTildes(texto);
+    if (termino.length < 2) {
+      throw new BadRequestException('Escriba al menos dos letras, o el DNI');
+    }
+
+    const lista = await this.finalistas();
+    const tutores = await this.prisma.tutor.findMany({
+      where: { id: { in: [...new Set(lista.map((f) => f.tutorId))] } },
+      select: {
+        id: true,
+        nombres: true,
+        apellidos: true,
+        celular: true,
+        correo: true,
+        institucion: true,
+      },
+    });
+    const porId = new Map(tutores.map((t) => [t.id, t]));
+
+    const coincide = (f: Finalista) => {
+      const t = porId.get(f.tutorId);
+      const tutor = t ? `${t.nombres} ${t.apellidos} ${t.correo}` : '';
+      return sinTildes(`${f.institucion} ${f.nombres} ${f.dni} ${tutor}`).includes(termino);
+    };
+
+    const encontrados = lista.filter(coincide);
+
+    return [...new Set(encontrados.map((f) => f.tutorId))].map((tutorId) => {
+      const t = porId.get(tutorId);
+      // Si la búsqueda dio con un alumno suelto, se muestran solo los que
+      // coinciden; si dio con la delegación, salen todos los suyos.
+      const suyos = encontrados.filter((f) => f.tutorId === tutorId);
+      const todos = lista.filter((f) => f.tutorId === tutorId);
+      const porDelegacion = suyos.length === todos.length;
+
+      return {
+        tutorId,
+        institucion: todos[0]?.institucion || '',
+        tutor: t ? `${t.nombres} ${t.apellidos}`.trim() : '',
+        celular: t?.celular || '',
+        correo: t?.correo || '',
+        total: todos.length,
+        porDelegacion,
+        finalistas: (porDelegacion ? todos : suyos).sort(
+          (a, b) => a.salon - b.salon || a.puesto - b.puesto,
+        ),
+      };
+    });
+  }
+
+  /**
+   * Avisa al tutor por el panel que ya tiene sus credenciales.
+   *
+   * Es el aviso interno, el mismo que suena en su campanita. No se inventa un
+   * tipo nuevo para no tocar la base: el de inscripción aprobada ya se pinta
+   * en verde con un visto, que es justo lo que esto quiere decir.
+   */
+  async avisar(tutorId: string, quien: string) {
+    const suyos = (await this.finalistas()).filter((f) => f.tutorId === tutorId);
+    if (suyos.length === 0) {
+      throw new NotFoundException('Esa delegación no tiene finalistas con aula asignada');
+    }
+
+    const { abierta } = await this.estado();
+    if (!abierta) {
+      throw new BadRequestException(
+        'Las credenciales todavía están cerradas: el tutor no podría descargarlas.',
+      );
+    }
+
+    const tutor = await this.prisma.tutor.findUnique({ where: { id: tutorId } });
+    await this.notificaciones.crear({
+      tipo: 'INSCRIPCION_APROBADA',
+      titulo: 'Credenciales de finalistas disponibles',
+      detalle:
+        `Ya puede descargar las credenciales de sus ${suyos.length} ` +
+        `${suyos.length === 1 ? 'finalista' : 'finalistas'} en Credencial FINALISTAS.`,
+      paraTutorId: tutorId,
+    });
+
+    this.log.log(`${quien} avisó a ${tutor?.institucion || tutorId} de sus credenciales.`);
+    return { ok: true, avisados: suyos.length, institucion: tutor?.institucion || '' };
+  }
+
   /** Una de muestra, para ver el diseño antes de abrirlo a nadie. */
   async muestra(): Promise<Buffer> {
     const { config } = await this.final.estado();
@@ -208,7 +309,7 @@ export class CredencialFinalService {
         categoria: 'A',
         grado: GRADOS[0].label,
         nivel: 'PRIMARIA',
-        salon: config.primerSalon,
+        salon: config.primerSalon.PRIMARIA,
         puesto: 7,
         hora: `${bloque.inicio} a ${bloque.fin}`,
       },
@@ -439,3 +540,11 @@ export class CredencialFinalService {
     doc.restore();
   }
 }
+
+/** Para buscar sin que estorben los acentos ni las mayúsculas. */
+const sinTildes = (texto: string) =>
+  String(texto || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .trim();

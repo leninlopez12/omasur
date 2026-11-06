@@ -57,13 +57,13 @@ export class AdminController {
     return this.admin.inscripciones({ estado, region, buscar });
   }
 
-  @Permiso('consultas')
+  @Permiso('consulta-tutores')
   @Get('tutores')
   tutores(@Query('estado') estado?: string, @Query('buscar') buscar?: string) {
     return this.admin.tutores({ estado, buscar });
   }
 
-  @Permiso('consultas')
+  @Permiso('consulta-estudiantes')
   @Get('estudiantes')
   estudiantes(
     @Query('estado') estado?: string,

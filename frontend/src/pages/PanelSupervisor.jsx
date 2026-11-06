@@ -26,6 +26,7 @@ import {
   ContenidoComision,
   SECCIONES_PANEL,
   SECCION_RESULTADOS,
+  SECCION_SUPERVISORES,
   TITULOS_COMISION,
   filtrarSecciones,
   idsVisibles,
@@ -45,15 +46,14 @@ const SECCION_EXAMEN = {
   id: 'examen',
   texto: 'Examen',
   icono: FileSpreadsheet,
-  permiso: 'examen',
   hijos: [
-    { id: 'examen-llenar', texto: 'Llenar por delegación', icono: Upload },
-    { id: 'examen-entregas', texto: 'Entregas recibidas', icono: Inbox },
-    { id: 'examen-consultas', texto: 'Consultas de envíos', icono: Search },
-    { id: 'examen-consolidado', texto: 'Consolidado', icono: ClipboardList },
-    { id: 'examen-enviadas', texto: 'Respuestas enviadas', icono: FileSpreadsheet },
-    { id: 'examen-prueba', texto: 'Prueba de envío', icono: FlaskConical },
-    { id: 'examen-clave', texto: 'Respuestas correctas', icono: ListChecks },
+    { id: 'examen-llenar', texto: 'Llenar por delegación', icono: Upload, permiso: 'examen-llenar' },
+    { id: 'examen-entregas', texto: 'Entregas recibidas', icono: Inbox, permiso: 'examen-entregas' },
+    { id: 'examen-consultas', texto: 'Consultas de envíos', icono: Search, permiso: 'examen-consultas' },
+    { id: 'examen-consolidado', texto: 'Consolidado', icono: ClipboardList, permiso: 'examen-consolidado' },
+    { id: 'examen-enviadas', texto: 'Respuestas enviadas', icono: FileSpreadsheet, permiso: 'examen-enviadas' },
+    { id: 'examen-prueba', texto: 'Prueba de envío', icono: FlaskConical, permiso: 'examen-prueba' },
+    { id: 'examen-clave', texto: 'Respuestas correctas', icono: ListChecks, permiso: 'examen-clave' },
   ],
 };
 
@@ -72,11 +72,13 @@ const SECCION_SALON = {
 };
 
 /** El panel completo, antes de quedarse en lo que cada uno tenga permitido. */
-const TODAS = [SECCION_SALON, SECCION_RESULTADOS, SECCION_EXAMEN, ...SECCIONES_PANEL];
+const TODAS = [SECCION_SALON, SECCION_RESULTADOS, SECCION_EXAMEN, ...SECCIONES_PANEL, SECCION_SUPERVISORES];
 
 const TITULOS = {
   ...TITULOS_COMISION,
   'final-salon': 'Final macrorregional · mi salón',
+  'supervisores-cuentas': 'Supervisores · Cuentas',
+  'supervisores-permisos': 'Supervisores · Permisos',
   'examen-llenar': 'Examen · Llenar por delegación',
   'examen-entregas': 'Examen · Entregas recibidas',
   'examen-consultas': 'Examen · Consultas de envíos',
@@ -98,7 +100,7 @@ export default function PanelSupervisor() {
  * Panel del supervisor.
  *
  * No hay un panel del supervisor: hay uno por supervisor. El administrador
- * reparte los módulos en Resultados · Supervisor a cargo y aquí se arma el
+ * reparte las pantallas en Supervisores · Permisos y aquí se arma el
  * sidebar con lo que le tocó. Si no le tocó nada, se lo dice en una línea en
  * vez de dejarlo mirando un panel vacío.
  */
@@ -124,7 +126,7 @@ function Contenido() {
       <PanelLayout compacto titulo="Panel" secciones={[]} actual="" alCambiar={() => {}}>
         <Aviso tipo="info">
           Todavía no tiene módulos asignados. El administrador se los habilita desde Resultados ·
-          Supervisor a cargo.
+          Supervisores · Permisos.
         </Aviso>
       </PanelLayout>
     );

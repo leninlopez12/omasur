@@ -26,7 +26,7 @@ export class CredentialsController {
 
   @UseGuards(JwtAuthGuard, RolesGuard, PermisoGuard)
   @Roles('ADMIN', 'SUPERVISOR')
-  @Permiso('credenciales', 'ajustes')
+  @Permiso('cred-delegaciones', 'cred-tutores', 'ajustes-credencial')
   @Get('etapas/todas')
   todas() {
     return this.etapas.todas();
@@ -34,7 +34,7 @@ export class CredentialsController {
 
   @UseGuards(JwtAuthGuard, RolesGuard, PermisoGuard)
   @Roles('ADMIN', 'SUPERVISOR')
-  @Permiso('credenciales', 'ajustes')
+  @Permiso('cred-delegaciones', 'cred-tutores', 'ajustes-credencial')
   @Post('etapas/:clave')
   guardar(@Param('clave') clave: string, @Body() body: Partial<Etapa>) {
     if (!this.etapas.esClave(clave)) {
@@ -46,7 +46,7 @@ export class CredentialsController {
   /** Una credencial de muestra, para ver cómo quedó el PDF antes de publicar. */
   @UseGuards(JwtAuthGuard, RolesGuard, PermisoGuard)
   @Roles('ADMIN', 'SUPERVISOR')
-  @Permiso('credenciales', 'ajustes')
+  @Permiso('cred-delegaciones', 'cred-tutores', 'ajustes-credencial')
   @Get('etapas/:clave/muestra')
   async muestra(@Param('clave') clave: string, @Res() res: Response) {
     const pdf = await this.credentials.muestra(clave);
@@ -61,7 +61,7 @@ export class CredentialsController {
 
   @UseGuards(JwtAuthGuard, RolesGuard, PermisoGuard)
   @Roles('ADMIN', 'SUPERVISOR')
-  @Permiso('credenciales')
+  @Permiso('cred-delegaciones')
   @Get('delegaciones')
   delegaciones() {
     return this.credentials.delegacionesAprobadas();
@@ -70,7 +70,7 @@ export class CredentialsController {
   /** Todos los alumnos aprobados de una delegación, en un PDF. */
   @UseGuards(JwtAuthGuard, RolesGuard, PermisoGuard)
   @Roles('ADMIN', 'SUPERVISOR')
-  @Permiso('credenciales')
+  @Permiso('cred-delegaciones')
   @Get('delegaciones/:tutorId')
   async credencialesDeDelegacion(
     @Param('tutorId') tutorId: string,
@@ -84,7 +84,7 @@ export class CredentialsController {
   /** La credencial de un tutor, o la de todos en un solo PDF. */
   @UseGuards(JwtAuthGuard, RolesGuard, PermisoGuard)
   @Roles('ADMIN', 'SUPERVISOR')
-  @Permiso('credenciales')
+  @Permiso('cred-tutores')
   @Get('tutores')
   async credencialesDeTutores(@Query('etapa') etapa: string, @Res() res: Response) {
     const pdf = await this.credentials.credencialesDeTutores(null, etapa);
@@ -93,7 +93,7 @@ export class CredentialsController {
 
   @UseGuards(JwtAuthGuard, RolesGuard, PermisoGuard)
   @Roles('ADMIN', 'SUPERVISOR')
-  @Permiso('credenciales')
+  @Permiso('cred-tutores')
   @Get('tutores/:tutorId')
   async credencialDeTutor(
     @Param('tutorId') tutorId: string,
@@ -133,7 +133,7 @@ export class CredentialsController {
 
   @UseGuards(JwtAuthGuard, RolesGuard, PermisoGuard)
   @Roles('ADMIN', 'SUPERVISOR')
-  @Permiso('credenciales')
+  @Permiso('cred-delegaciones', 'cred-tutores')
   @Post('publica')
   cambiarPublica(@Body() body: { activa: boolean }) {
     return this.credentials.cambiarPublica(Boolean(body?.activa));
@@ -155,7 +155,7 @@ export class CredentialsController {
   /** La misma credencial, pedida desde el panel para atender a un tutor. */
   @UseGuards(JwtAuthGuard, RolesGuard, PermisoGuard)
   @Roles('ADMIN', 'SUPERVISOR')
-  @Permiso('consultas', 'credenciales')
+  @Permiso('consulta-estudiantes', 'cred-delegaciones', 'cred-tutores')
   @Get('comision/:dni')
   async porDniComision(
     @Param('dni') dni: string,

@@ -22,6 +22,7 @@ import {
   Settings,
   Trophy,
   UserCheck,
+  ShieldCheck,
   UserCog,
   Users,
   Wallet,
@@ -114,16 +115,33 @@ export const SECCION_RESULTADOS = {
       permiso: 'resultados-consultar',
     },
     {
-      id: 'resultados-encargados',
-      texto: 'Supervisor a cargo',
-      icono: UserCog,
-      permiso: 'resultados-encargados',
-    },
-    {
       id: 'resultados-publica',
       texto: 'Hacer pública consulta',
       icono: Megaphone,
       permiso: 'resultados-publica',
+    },
+  ],
+};
+
+/**
+ * Supervisores: el equipo.
+ *
+ * Estaba repartido entre Resultados y Ajustes, que no es donde nadie lo
+ * buscaría. Las cuentas y los permisos son dos caras de lo mismo, así que van
+ * juntas y en su propio sitio.
+ */
+export const SECCION_SUPERVISORES = {
+  id: 'supervisores',
+  texto: 'Supervisores',
+  icono: UserCog,
+  hijos: [
+    // Crear y borrar cuentas no se delega: es la llave del equipo entero.
+    { id: 'supervisores-cuentas', texto: 'Cuentas', icono: UserCheck, soloAdmin: true },
+    {
+      id: 'supervisores-permisos',
+      texto: 'Permisos',
+      icono: ShieldCheck,
+      permiso: 'supervisores-permisos',
     },
   ],
 };
@@ -143,10 +161,9 @@ export const SECCIONES_PANEL = [
     id: 'consultas',
     texto: 'Consultas',
     icono: Search,
-    permiso: 'consultas',
     hijos: [
-      { id: 'consulta-tutores', texto: 'Tutores', icono: Users },
-      { id: 'consulta-estudiantes', texto: 'Estudiantes', icono: IconoGrado },
+      { id: 'consulta-tutores', texto: 'Tutores', icono: Users, permiso: 'consulta-tutores' },
+      { id: 'consulta-estudiantes', texto: 'Estudiantes', icono: IconoGrado, permiso: 'consulta-estudiantes' },
     ],
   },
   { id: 'consolidado', texto: 'Consolidado', icono: ClipboardList, permiso: 'consolidado' },
@@ -155,30 +172,26 @@ export const SECCIONES_PANEL = [
     id: 'credenciales',
     texto: 'Credenciales',
     icono: IdCard,
-    permiso: 'credenciales',
     hijos: [
-      { id: 'cred-delegaciones', texto: 'De delegaciones', icono: Users },
-      { id: 'cred-tutores', texto: 'De tutores', icono: UserCheck },
+      { id: 'cred-delegaciones', texto: 'De delegaciones', icono: Users, permiso: 'cred-delegaciones' },
+      { id: 'cred-tutores', texto: 'De tutores', icono: UserCheck, permiso: 'cred-tutores' },
     ],
   },
   {
     id: 'ajustes',
     texto: 'Ajustes',
     icono: Settings,
-    permiso: 'ajustes',
     hijos: [
-      { id: 'ajustes-inscripciones', texto: 'Inscripciones', icono: CalendarCheck },
-      { id: 'ajustes-whatsapp', texto: 'Grupo WhatsApp', icono: IconoWhatsApp },
-      { id: 'ajustes-boton-wa', texto: 'Botón de WhatsApp', icono: MessageCircle },
-      { id: 'ajustes-yape', texto: 'Yape', icono: QrCode },
-      { id: 'ajustes-bcp', texto: 'BCP', icono: Landmark },
-      { id: 'ajustes-credencial', texto: 'Diseño de credenciales', icono: IdCard },
-      { id: 'ajustes-comunicado', texto: 'Comunicado', icono: Megaphone },
-      { id: 'ajustes-imagenes', texto: 'Imágenes', icono: ImageIcon },
-      { id: 'ajustes-bases', texto: 'Bases del concurso', icono: FileText },
-      // Crear supervisores y escribir a todos los tutores se queda en el
-      // administrador: con el permiso de ajustes no viene el equipo.
-      { id: 'ajustes-supervisores', texto: 'Supervisores', icono: UserCog, soloAdmin: true },
+      { id: 'ajustes-inscripciones', texto: 'Inscripciones', icono: CalendarCheck, permiso: 'ajustes-inscripciones' },
+      { id: 'ajustes-whatsapp', texto: 'Grupo WhatsApp', icono: IconoWhatsApp, permiso: 'ajustes-whatsapp' },
+      { id: 'ajustes-boton-wa', texto: 'Botón de WhatsApp', icono: MessageCircle, permiso: 'ajustes-boton-wa' },
+      { id: 'ajustes-yape', texto: 'Yape', icono: QrCode, permiso: 'ajustes-yape' },
+      { id: 'ajustes-bcp', texto: 'BCP', icono: Landmark, permiso: 'ajustes-bcp' },
+      { id: 'ajustes-credencial', texto: 'Diseño de credenciales', icono: IdCard, permiso: 'ajustes-credencial' },
+      { id: 'ajustes-comunicado', texto: 'Comunicado', icono: Megaphone, permiso: 'ajustes-comunicado' },
+      { id: 'ajustes-imagenes', texto: 'Imágenes', icono: ImageIcon, permiso: 'ajustes-imagenes' },
+      { id: 'ajustes-bases', texto: 'Bases del concurso', icono: FileText, permiso: 'ajustes-bases' },
+      // Escribirle a todos los tutores de golpe se queda en el administrador.
       { id: 'ajustes-avisos', texto: 'Avisos por correo', icono: Mail, soloAdmin: true },
     ],
   },
@@ -191,8 +204,9 @@ export const TITULOS_COMISION = {
   'resultados-general': 'Resultados · General y publicación',
   'resultados-clasificados': 'Resultados · Tutores clasificados',
   'resultados-consultar': 'Resultados · Consultar y descargar',
-  'resultados-encargados': 'Resultados · Supervisor a cargo',
   'resultados-publica': 'Resultados · Hacer pública la consulta',
+  'supervisores-cuentas': 'Supervisores · Cuentas',
+  'supervisores-permisos': 'Supervisores · Permisos',
   tablero: 'Tablero general',
   'revisar-alumnos': 'Inscripciones por alumno',
   inscripciones: 'Delegaciones',
@@ -213,7 +227,6 @@ export const TITULOS_COMISION = {
   'ajustes-comunicado': 'Ajustes · Comunicado',
   'ajustes-imagenes': 'Ajustes · Imágenes',
   'ajustes-bases': 'Ajustes · Bases del concurso',
-  'ajustes-supervisores': 'Ajustes · Supervisores',
   'ajustes-avisos': 'Ajustes · Avisos por correo',
 };
 
@@ -261,7 +274,6 @@ export function ContenidoComision({ seccion, detalleId, setDetalleId, irA, abrir
       {seccion === 'resultados-general' && <ResultadosGeneral />}
       {seccion === 'resultados-clasificados' && <TutoresClasificados />}
       {seccion === 'resultados-consultar' && <ConsultarResultados />}
-      {seccion === 'resultados-encargados' && <PermisosSupervisores />}
       {seccion === 'resultados-publica' && <ConsultaPublica />}
 
       {seccion === 'tablero' && <Tablero irA={irA} />}
@@ -316,7 +328,8 @@ export function ContenidoComision({ seccion, detalleId, setDetalleId, irA, abrir
       {seccion === 'ajustes-bases' && (
         <AjusteBases bases={ajustes.bases} alCambiar={recargarAjustes} />
       )}
-      {seccion === 'ajustes-supervisores' && <Supervisores />}
+      {seccion === 'supervisores-cuentas' && <Supervisores />}
+      {seccion === 'supervisores-permisos' && <PermisosSupervisores />}
       {seccion === 'ajustes-avisos' && <Avisos />}
     </>
   );

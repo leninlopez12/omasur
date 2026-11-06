@@ -355,7 +355,7 @@ export default function FinalReparto() {
                     key={s.id}
                     type="button"
                     onClick={() => setElegido(s.id)}
-                    className={`w-24 rounded-2xl border-2 px-2 py-3 text-center transition hover:-translate-y-0.5 ${
+                    className={`w-28 rounded-2xl border-2 px-2 py-3 text-center transition hover:-translate-y-0.5 ${
                       activo ? 'border-granate-600 bg-granate-50 shadow-suave' : color
                     }`}
                   >
@@ -367,8 +367,14 @@ export default function FinalReparto() {
                     >
                       {s.total}/{config.capacidad}
                     </span>
-                    <span className="mt-1 block truncate text-xs text-slate-500">
-                      {s.categorias.join(' ') || '—'}
+                    {/* Qué categoría se sienta ahí, que es lo que se busca de
+                        un vistazo cuando hay cuarenta aulas. */}
+                    <span className="mt-1.5 block truncate text-base font-bold text-granate-700">
+                      {s.categorias.length === 0
+                        ? 'Vacío'
+                        : s.categorias.length === 1
+                          ? `CAT. ${s.categorias[0]}`
+                          : `CAT. ${s.categorias.join('/')}`}
                     </span>
                   </button>
                 );

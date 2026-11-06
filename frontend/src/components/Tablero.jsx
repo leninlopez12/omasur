@@ -318,7 +318,7 @@ export default function Tablero({ irA }) {
             <p className="mt-1 text-base text-slate-600">Administradores</p>
           </div>
           <button
-            onClick={() => irA('ajustes-supervisores')}
+            onClick={() => irA('supervisores-cuentas')}
             className="rounded-2xl bg-granate-50 p-5 text-left transition hover:bg-granate-100"
           >
             <p className="text-3xl font-black text-granate-700">{metricas.equipo.supervisores}</p>

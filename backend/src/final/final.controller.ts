@@ -390,6 +390,28 @@ export class FinalController {
     );
   }
 
+  /** Buscar finalistas por colegio, tutor, nombre o DNI. */
+  @SoloAdmin()
+  @Get('credencial/buscar')
+  buscarCredenciales(@Query('q') q: string) {
+    return this.credencial.buscar(q);
+  }
+
+  /** La de un alumno suelto, sin exigir que la descarga esté abierta. */
+  @SoloAdmin()
+  @Get('credencial/alumno/:dni')
+  async credencialDeAlumno(@Param('dni') dni: string, @Res() res: Response) {
+    const pdf = await this.credencial.pdfPorDni(dni, false);
+    this.enviarPdf(res, pdf, `credencial-final-${dni}.pdf`);
+  }
+
+  /** Le avisa al tutor por su panel que ya puede descargarlas. */
+  @SoloAdmin()
+  @Post('credencial/avisar/:tutorId')
+  avisarCredenciales(@Param('tutorId') tutorId: string, @CurrentUser() usuario: JwtUser) {
+    return this.credencial.avisar(tutorId, usuario.nombre || 'La comisión');
+  }
+
   /** Las de una delegación, para atender al tutor que no puede entrar. */
   @SoloAdmin()
   @Get('credencial/delegacion/:tutorId')

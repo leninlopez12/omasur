@@ -35,8 +35,9 @@ interface Bloque {
 export interface ConfigFinal {
   /** Cuántos entran por salón. */
   capacidad: number;
-  /** El número del primer salón de cada turno; de ahí para arriba. */
-  primerSalon: number;
+  /** Desde qué número numera cada turno. Secundaria y primaria no comparten
+   *  aulas de verdad: así el número dice solo el turno. */
+  primerSalon: Record<NivelFinal, number>;
   sede: string;
   fecha: string;
   bloques: Record<NivelFinal, Bloque>;
@@ -45,7 +46,7 @@ export interface ConfigFinal {
 
 const CONFIG_VACIA: ConfigFinal = {
   capacidad: 30,
-  primerSalon: 101,
+  primerSalon: { SECUNDARIA: 101, PRIMARIA: 201 },
   sede: '',
   fecha: '08 de noviembre de 2026',
   bloques: {
@@ -76,7 +77,7 @@ export interface Salon {
 export interface Sorteo {
   generadoEn: string;
   capacidad: number;
-  primerSalon: number;
+  primerSalon: Record<NivelFinal, number>;
   salones: Salon[];
 }
 
@@ -117,6 +118,11 @@ export class FinalService {
         ...this.vacia(),
         ...guardada,
         bloques: { ...CONFIG_VACIA.bloques, ...guardada.bloques },
+        // Antes era un solo número para los dos turnos: se arrastra.
+        primerSalon:
+          typeof guardada.primerSalon === 'number'
+            ? { SECUNDARIA: guardada.primerSalon, PRIMARIA: guardada.primerSalon + 100 }
+            : { ...CONFIG_VACIA.primerSalon, ...guardada.primerSalon },
       };
     } catch {
       return this.vacia();
@@ -124,7 +130,11 @@ export class FinalService {
   }
 
   private vacia(): ConfigFinal {
-    return { ...CONFIG_VACIA, bloques: { ...CONFIG_VACIA.bloques } };
+    return {
+      ...CONFIG_VACIA,
+      bloques: { ...CONFIG_VACIA.bloques },
+      primerSalon: { ...CONFIG_VACIA.primerSalon },
+    };
   }
 
   async guardarConfig(datos: Partial<ConfigFinal>) {
@@ -139,11 +149,15 @@ export class FinalService {
     }
 
     if (datos.primerSalon !== undefined) {
-      const n = Number(datos.primerSalon);
-      if (!Number.isInteger(n) || n < 1 || n > 9999) {
-        throw new BadRequestException('El número del primer salón no es válido');
+      for (const nivel of ORDEN_NIVELES) {
+        const bruto = (datos.primerSalon as any)?.[nivel];
+        if (bruto === undefined) continue;
+        const n = Number(bruto);
+        if (!Number.isInteger(n) || n < 1 || n > 9999) {
+          throw new BadRequestException('El número del primer salón no es válido');
+        }
+        config.primerSalon[nivel] = n;
       }
-      config.primerSalon = n;
     }
 
     if (datos.sede !== undefined) config.sede = String(datos.sede).trim().slice(0, 160);
@@ -232,7 +246,7 @@ export class FinalService {
     const salones: Salon[] = [];
 
     for (const nivel of ORDEN_NIVELES) {
-      let numero = config.primerSalon;
+      let numero = config.primerSalon[nivel];
 
       for (const grado of GRADOS.filter((g) => g.nivel === nivel)) {
         const suyos = clasificados
@@ -261,7 +275,7 @@ export class FinalService {
     const sorteo: Sorteo = {
       generadoEn: new Date().toISOString(),
       capacidad: config.capacidad,
-      primerSalon: config.primerSalon,
+      primerSalon: { ...config.primerSalon },
       salones,
     };
 
@@ -521,7 +535,7 @@ export class FinalService {
     const ocupados = new Set(
       sorteo.salones.filter((s) => s.nivel === nivel).map((s) => s.numero),
     );
-    let numero = sorteo.primerSalon;
+    let numero = sorteo.primerSalon?.[nivel as NivelFinal] ?? 101;
     while (ocupados.has(numero)) numero += 1;
 
     sorteo.salones.push({
