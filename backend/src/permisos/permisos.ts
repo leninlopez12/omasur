@@ -19,6 +19,19 @@ export const PERMISOS_RESULTADOS = [
   'resultados-publica',
 ] as const;
 
+/**
+ * La etapa final macrorregional.
+ *
+ * El único permiso que se reparte es el del responsable de aula, y es distinto
+ * de todos los demás: no abre un módulo entero, abre el aula que le tocó.
+ * Quién vigila cuál lo dice el reparto de salones, no el permiso; el permiso
+ * solo dice que puede subir las respuestas de la suya.
+ *
+ * Lo demás de la final —la clave, el reparto, la premiación— no está aquí a
+ * propósito: se queda en el administrador y no hay forma de concederlo.
+ */
+export const PERMISOS_FINAL = ['final-salon'] as const;
+
 export const PERMISOS_COMISION = [
   'examen',
   'tablero',
@@ -33,7 +46,11 @@ export const PERMISOS_COMISION = [
   'ajustes',
 ] as const;
 
-export const PERMISOS = [...PERMISOS_RESULTADOS, ...PERMISOS_COMISION] as const;
+export const PERMISOS = [
+  ...PERMISOS_FINAL,
+  ...PERMISOS_RESULTADOS,
+  ...PERMISOS_COMISION,
+] as const;
 
 export type Permiso = (typeof PERMISOS)[number];
 

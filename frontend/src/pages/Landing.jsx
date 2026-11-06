@@ -81,6 +81,7 @@ export default function Landing() {
   const [resultados, setResultados] = useState(null);
 
   const [credencial, setCredencial] = useState(null);
+  const [finalista, setFinalista] = useState(null);
 
   useEffect(() => {
     api
@@ -92,6 +93,12 @@ export default function Landing() {
       .get('/credenciales/publica')
       .then(({ data }) => setCredencial(data))
       .catch(() => setCredencial(null));
+
+    // La de la final es otro botón: aparece cuando el administrador la abre.
+    api
+      .get('/final/credencial/estado')
+      .then(({ data }) => setFinalista(data))
+      .catch(() => setFinalista(null));
   }, []);
 
   return (
@@ -141,7 +148,7 @@ export default function Landing() {
           {/* Cada botón aparece solo en su momento: inscribir mientras la
               inscripción esté abierta y la credencial cuando la comisión la
               habilite. Un botón que no lleva a nada es peor que ninguno. */}
-          {(!cerradas || credencial?.activa) && (
+          {(!cerradas || credencial?.activa || finalista?.abierta) && (
             <div className="animate-aparecer mt-12 flex flex-col items-center justify-center gap-4 sm:flex-row">
               {!cerradas && (
                 <Link to="/inscripcion">
@@ -160,6 +167,15 @@ export default function Landing() {
                   >
                     <IdCard className="h-7 w-7" />
                     Mi credencial
+                  </Boton>
+                </Link>
+              )}
+
+              {finalista?.abierta && (
+                <Link to="/credencial-finalista">
+                  <Boton variante="blanco" tamano="grande" className="font-black">
+                    <IdCard className="h-7 w-7" />
+                    Credencial finalista
                   </Boton>
                 </Link>
               )}

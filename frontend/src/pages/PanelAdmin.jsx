@@ -1,14 +1,22 @@
 import { useState } from 'react';
 import {
+  ArrowRightLeft,
+  Award,
   Ban,
   Calculator,
+  ClipboardCheck,
   ClipboardList,
+  DoorOpen,
   FileSpreadsheet,
   FlaskConical,
   Inbox,
+  IdCard,
   ListChecks,
+  Medal,
+  Megaphone,
   PencilLine,
   Search,
+  Trophy,
   Upload,
   Video,
 } from 'lucide-react';
@@ -40,6 +48,22 @@ import {
   SECCION_RESULTADOS,
   TITULOS_COMISION,
 } from '../components/SeccionesComision.jsx';
+import FinalSalones from '../components/FinalSalones.jsx';
+import FinalReparto from '../components/FinalReparto.jsx';
+import FinalCredenciales from '../components/FinalCredenciales.jsx';
+import {
+  FinalExamenClave,
+  FinalExamenEnvios,
+  FinalExamenLlenar,
+  FinalExamenPuntaje,
+} from '../components/FinalExamen.jsx';
+import {
+  FinalConsultar,
+  FinalPremiacion,
+  FinalPublicacion,
+  FinalResultadosGeneral,
+  FinalResultadosTop,
+} from '../components/FinalResultados.jsx';
 
 /**
  * El examen completo: solo el administrador.
@@ -66,10 +90,67 @@ const SECCION_EXAMEN = {
   ],
 };
 
-const SECCIONES = [SECCION_RESULTADOS, SECCION_EXAMEN, ...SECCIONES_PANEL];
+/**
+ * La etapa final macrorregional, que va arriba de todo.
+ *
+ * El examen y los resultados de más abajo son los de la etapa institucional,
+ * la que ya pasó. Estos dos son los del 08 de noviembre, presencial y en una
+ * sola sede, y son lo que se está trabajando ahora: por eso encabezan.
+ *
+ * No se reparten: la clave, el reparto de aulas y la premiación se quedan en
+ * el administrador. Lo único que se delega es el aula, y eso le aparece al
+ * responsable en su propio panel.
+ */
+const SECCION_EXAMEN_FINAL = {
+  id: 'final-examen',
+  texto: 'Examen final',
+  icono: ClipboardCheck,
+  hijos: [
+    { id: 'final-salones', texto: 'Salones y horarios', icono: DoorOpen },
+    { id: 'final-reparto', texto: 'Reparto de alumnos', icono: ArrowRightLeft },
+    { id: 'final-clave', texto: 'Respuestas correctas', icono: ListChecks },
+    { id: 'final-puntaje', texto: 'Puntaje y apertura', icono: Calculator },
+    { id: 'final-llenar', texto: 'Llenar por salón', icono: Upload },
+    { id: 'final-envios', texto: 'Consulta de envíos', icono: Inbox },
+    { id: 'final-credenciales', texto: 'Credenciales', icono: IdCard },
+  ],
+};
+
+const SECCION_RESULTADOS_FINAL = {
+  id: 'final-resultados',
+  texto: 'Resultados finales',
+  icono: Trophy,
+  hijos: [
+    { id: 'final-general', texto: 'General', icono: Award },
+    { id: 'final-top', texto: 'Por categoría', icono: Trophy },
+    { id: 'final-premiacion', texto: 'Premiación', icono: Medal },
+    { id: 'final-consultar', texto: 'Consultar', icono: Search },
+    { id: 'final-publicacion', texto: 'Publicación y consulta', icono: Megaphone },
+  ],
+};
+
+const SECCIONES = [
+  SECCION_EXAMEN_FINAL,
+  SECCION_RESULTADOS_FINAL,
+  SECCION_RESULTADOS,
+  SECCION_EXAMEN,
+  ...SECCIONES_PANEL,
+];
 
 const TITULOS = {
   ...TITULOS_COMISION,
+  'final-salones': 'Final · Salones y horarios',
+  'final-reparto': 'Final · Reparto de alumnos',
+  'final-clave': 'Final · Respuestas correctas',
+  'final-puntaje': 'Final · Puntaje y apertura',
+  'final-llenar': 'Final · Llenar por salón',
+  'final-envios': 'Final · Consulta de envíos',
+  'final-credenciales': 'Final · Credenciales de finalistas',
+  'final-general': 'Final · General',
+  'final-top': 'Final · Por categoría',
+  'final-premiacion': 'Final · Premiación',
+  'final-consultar': 'Final · Consultar',
+  'final-publicacion': 'Final · Publicación y consulta',
   'examen-respuestas': 'Examen · Respuestas correctas',
   'examen-puntaje': 'Examen · Puntaje',
   'examen-prueba': 'Examen · Probar el envío',
@@ -122,6 +203,20 @@ function Contenido() {
     >
       <AvisosEnVivo alAbrirTutor={abrirTutor} />
       <PermisoAvisos />
+
+      {seccion === 'final-salones' && <FinalSalones />}
+      {seccion === 'final-reparto' && <FinalReparto />}
+      {seccion === 'final-clave' && <FinalExamenClave />}
+      {seccion === 'final-puntaje' && <FinalExamenPuntaje />}
+      {seccion === 'final-llenar' && <FinalExamenLlenar />}
+      {seccion === 'final-envios' && <FinalExamenEnvios />}
+      {seccion === 'final-credenciales' && <FinalCredenciales />}
+
+      {seccion === 'final-general' && <FinalResultadosGeneral />}
+      {seccion === 'final-top' && <FinalResultadosTop />}
+      {seccion === 'final-premiacion' && <FinalPremiacion />}
+      {seccion === 'final-consultar' && <FinalConsultar />}
+      {seccion === 'final-publicacion' && <FinalPublicacion />}
 
       {seccion === 'examen-respuestas' && <ExamenRespuestas />}
       {seccion === 'examen-puntaje' && <ExamenPuntaje />}

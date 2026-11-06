@@ -55,6 +55,21 @@ export const PERMISOS_RESULTADOS = [
   },
 ];
 
+/**
+ * La final macrorregional.
+ *
+ * Lo único que se reparte es el aula. La clave, el reparto de salones y la
+ * premiación no están aquí a propósito: se quedan en el administrador.
+ */
+export const PERMISOS_FINAL = [
+  {
+    id: 'final-salon',
+    texto: 'Mi salón · final',
+    detalle: 'Subir el acta de los salones que tenga a su cargo el día de la final.',
+    aviso: 'Qué salón vigila se asigna en Examen final · Salones, no aquí.',
+  },
+];
+
 export const PERMISOS_COMISION = [
   {
     id: 'examen',
@@ -95,7 +110,7 @@ export const PERMISOS_COMISION = [
   },
 ];
 
-export const PERMISOS = [...PERMISOS_RESULTADOS, ...PERMISOS_COMISION];
+export const PERMISOS = [...PERMISOS_FINAL, ...PERMISOS_RESULTADOS, ...PERMISOS_COMISION];
 
 /** Para pintar el nombre de un permiso sin buscar en las dos listas. */
 export const TEXTO_PERMISO = Object.fromEntries(PERMISOS.map((p) => [p.id, p.texto]));

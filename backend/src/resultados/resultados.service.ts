@@ -474,6 +474,38 @@ export class ResultadosService {
 
   // --------------------------------------------------------------- decisiones
 
+  /**
+   * Mueve a un alumno de llave cuando le corrigen el DNI.
+   *
+   * Aquí nadie se guarda por su id: un alumno es `tutorId:dni`, y de esa llave
+   * cuelgan tanto lo que la comisión decidió a mano como el pozo en el que lo
+   * pusieron. Si el DNI cambia y la llave no, las dos cosas se quedan
+   * huérfanas y el alumno vuelve al cálculo como si nadie lo hubiera tocado.
+   */
+  async moverAlumno(tutorId: string, dniAnterior: string, dniNuevo: string) {
+    const vieja = `${tutorId}:${String(dniAnterior).trim()}`;
+    const nueva = `${tutorId}:${String(dniNuevo).trim()}`;
+    if (vieja === nueva) return { decision: false, agrupacion: false };
+
+    const config = await this.config();
+    const movido = { decision: false, agrupacion: false };
+
+    if (config.manual[vieja]) {
+      config.manual[nueva] = config.manual[vieja];
+      delete config.manual[vieja];
+      movido.decision = true;
+    }
+
+    for (const grupo of config.agrupaciones) {
+      if (!grupo.miembros.includes(vieja)) continue;
+      grupo.miembros = grupo.miembros.map((m) => (m === vieja ? nueva : m));
+      movido.agrupacion = true;
+    }
+
+    if (movido.decision || movido.agrupacion) await this.guardar(config);
+    return movido;
+  }
+
   async decidir(clave: string, estado: 'CLASIFICA' | 'NO_CLASIFICA' | null, ola?: Ola) {
     const config = await this.config();
 

@@ -9,6 +9,7 @@ import { CredentialsModule } from './credentials/credentials.module';
 import { AdminModule } from './admin/admin.module';
 import { ExamenModule } from './examen/examen.module';
 import { ResultadosModule } from './resultados/resultados.module';
+import { FinalModule } from './final/final.module';
 import { SettingsModule } from './settings/settings.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { StorageModule } from './storage/storage.module';
@@ -28,6 +29,7 @@ import { PermisosModule } from './permisos/permisos.module';
     AdminModule,
     ExamenModule,
     ResultadosModule,
+    FinalModule,
     SettingsModule,
     NotificationsModule,
     StorageModule,

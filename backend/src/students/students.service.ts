@@ -1,10 +1,18 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import * as ExcelJS from 'exceljs';
 import { Modalidad, NivelInstitucion } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { ExamenService } from '../examen/examen.service';
+import { ResultadosService } from '../resultados/resultados.service';
 import { GRADOS, GradoInfo, etiquetaGrado, resolverGrado } from '../common/grados';
 import { gradosPermitidos, minimosDe } from '../common/reglas';
-import { CrearAlumnoDto } from './dto';
+import { ActualizarAlumnoDto, CrearAlumnoDto } from './dto';
 
 export interface ResultadoImportacion {
   creados: number;
@@ -15,7 +23,13 @@ const GRANATE = 'FF7B1E2B';
 
 @Injectable()
 export class StudentsService {
-  constructor(private prisma: PrismaService) {}
+  private readonly log = new Logger('Alumnos');
+
+  constructor(
+    private prisma: PrismaService,
+    private examen: ExamenService,
+    private resultados: ResultadosService,
+  ) {}
 
   listar(tutorId: string) {
     return this.prisma.student.findMany({
@@ -45,23 +59,88 @@ export class StudentsService {
     });
   }
 
-  async actualizar(tutorId: string, id: string, nombres: string, grado: string) {
+  /**
+   * Corrige los datos de un estudiante ya registrado.
+   *
+   * El nombre y el DNI se arreglan siempre, aunque las inscripciones ya estén
+   * cerradas y el alumno haya rendido: una errata de tipeo se descubre tarde
+   * —muchas veces al imprimir la credencial— y obligar a borrarlo y volver a
+   * empezar perdería su examen y su pago.
+   *
+   * El grado no, una vez cerradas: de él sale la categoría con la que se
+   * corrigió su examen, así que moverlo después mezclaría respuestas de una
+   * categoría con la clave de otra.
+   */
+  async actualizar(tutorId: string, id: string, dto: ActualizarAlumnoDto) {
     const alumno = await this.prisma.student.findFirst({ where: { id, tutorId } });
     if (!alumno) throw new NotFoundException('Alumno no encontrado');
 
-    const info = resolverGrado(grado);
-    if (!info) throw new BadRequestException('Grado no reconocido: ' + grado);
-    await this.comprobarNivel(tutorId, info);
+    const info = resolverGrado(dto.grado);
+    if (!info) throw new BadRequestException('Grado no reconocido: ' + dto.grado);
 
-    return this.prisma.student.update({
+    const nombres = this.limpiarNombre(dto.nombres);
+    const dni = (dto.dni ?? alumno.dni).trim();
+
+    if (info.grado !== alumno.grado) {
+      await this.comprobarInscripcionesAbiertas(
+        'El grado ya no se puede cambiar: de él sale la categoría con la que se corrigió el examen. ' +
+          'Escriba a la comisión si hubo un error.',
+      );
+      await this.comprobarNivel(tutorId, info);
+    }
+
+    if (dni !== alumno.dni) {
+      if (!/^\d{8}$/.test(dni)) {
+        throw new BadRequestException('El DNI debe tener exactamente 8 dígitos');
+      }
+      const duplicado = await this.prisma.student.findUnique({ where: { dni } });
+      if (duplicado) throw new BadRequestException('El DNI ' + dni + ' ya está inscrito');
+    }
+
+    const actualizado = await this.prisma.student.update({
       where: { id },
       data: {
-        nombres: this.limpiarNombre(nombres),
+        dni,
+        nombres,
         grado: info.grado,
         nivel: info.nivel,
         categoria: info.categoria,
       },
     });
+
+    // Su ficha es la fuente de todo lo que se arma por delegación —la
+    // inscripción, el consolidado, los reportes, la credencial—, así que esas
+    // pantallas quedan corregidas solas. Lo único que no sigue es lo que se
+    // guardó como copia el día del examen, y las llaves que llevan el DNI
+    // dentro.
+    const arrastre = { examen: false, decision: false, agrupacion: false };
+
+    if (dni !== alumno.dni || nombres !== alumno.nombres) {
+      arrastre.examen = await this.examen.renombrarAlumno(tutorId, alumno.dni, { dni, nombres });
+    }
+    if (dni !== alumno.dni) {
+      const movido = await this.resultados.moverAlumno(tutorId, alumno.dni, dni);
+      arrastre.decision = movido.decision;
+      arrastre.agrupacion = movido.agrupacion;
+    }
+
+    if (dni !== alumno.dni) {
+      this.log.warn(
+        `${alumno.nombres} pasó del DNI ${alumno.dni} al ${dni}` +
+          (arrastre.examen ? ', y se arrastró a su examen ya entregado' : '') +
+          '.',
+      );
+    }
+
+    return { ...actualizado, arrastre };
+  }
+
+  /** Lo que solo se puede tocar mientras el periodo sigue abierto. */
+  private async comprobarInscripcionesAbiertas(motivo: string) {
+    const ajuste = await this.prisma.ajuste.findUnique({
+      where: { clave: 'inscripciones_cerradas' },
+    });
+    if (ajuste?.valor === 'true') throw new ForbiddenException(motivo);
   }
 
   async eliminar(tutorId: string, id: string) {

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import {
   ClipboardList,
+  DoorOpen,
   FileSpreadsheet,
   FlaskConical,
   Inbox,
@@ -18,6 +19,7 @@ import {
   ExamenEntregas,
   ExamenEnviadas,
 } from '../components/ExamenEntregas.jsx';
+import { FinalExamenLlenar } from '../components/FinalExamen.jsx';
 import Campanita from '../components/Campanita.jsx';
 import AvisosEnVivo from '../components/AvisosEnVivo.jsx';
 import {
@@ -55,11 +57,26 @@ const SECCION_EXAMEN = {
   ],
 };
 
+/**
+ * La final macrorregional, para quien vigila un aula.
+ *
+ * Es una sola pantalla y no un grupo: el responsable no administra la final,
+ * sube el acta del salón que le tocó. Qué salón es lo dice el reparto, no el
+ * permiso, así que aquí no hay nada que elegir.
+ */
+const SECCION_SALON = {
+  id: 'final-salon',
+  texto: 'Mi salón · final',
+  icono: DoorOpen,
+  permiso: 'final-salon',
+};
+
 /** El panel completo, antes de quedarse en lo que cada uno tenga permitido. */
-const TODAS = [SECCION_RESULTADOS, SECCION_EXAMEN, ...SECCIONES_PANEL];
+const TODAS = [SECCION_SALON, SECCION_RESULTADOS, SECCION_EXAMEN, ...SECCIONES_PANEL];
 
 const TITULOS = {
   ...TITULOS_COMISION,
+  'final-salon': 'Final macrorregional · mi salón',
   'examen-llenar': 'Examen · Llenar por delegación',
   'examen-entregas': 'Examen · Entregas recibidas',
   'examen-consultas': 'Examen · Consultas de envíos',
@@ -138,6 +155,8 @@ function Contenido() {
       acciones={<Campanita alAbrirTutor={abrirTutor} />}
     >
       <AvisosEnVivo alAbrirTutor={abrirTutor} />
+
+      {actual === 'final-salon' && <FinalExamenLlenar soloMios />}
 
       {actual === 'examen-llenar' && <ExamenLlenar />}
       {actual === 'examen-entregas' && <ExamenEntregas />}

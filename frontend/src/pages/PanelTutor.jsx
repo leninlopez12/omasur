@@ -11,6 +11,7 @@ import {
   IdCard,
   LayoutDashboard,
   Lock,
+  Medal,
   MessageSquare,
   Send,
   ReceiptText,
@@ -28,6 +29,7 @@ import Campanita from '../components/Campanita.jsx';
 import AvisosEnVivo from '../components/AvisosEnVivo.jsx';
 import { NotificacionesProvider } from '../lib/notificaciones.jsx';
 import GestorAlumnos from '../components/GestorAlumnos.jsx';
+import CredencialesFinalistas from '../components/CredencialesFinalistas.jsx';
 import PasoPago, { Confirmado } from '../components/PasoPago.jsx';
 import MisInscripciones from '../components/MisInscripciones.jsx';
 import RespuestasExamen, { AvisoExamen } from '../components/RespuestasExamen.jsx';
@@ -64,6 +66,7 @@ const SECCIONES = [
   { id: 'pago', texto: 'Comprobante de pago', icono: CreditCard },
   { id: 'historial', texto: 'Inscripciones', icono: ReceiptText },
   { id: 'credenciales', texto: 'Credenciales', icono: IdCard },
+  { id: 'credenciales-finalistas', texto: 'Credencial FINALISTAS', icono: Medal },
   { id: 'mi-credencial', texto: 'Mi credencial', icono: BadgeCheck },
 ];
 
@@ -78,6 +81,7 @@ const TITULOS = {
   'pago-quienes': 'Pago de la delegación',
   pago: 'Comprobante de pago',
   credenciales: 'Credenciales de mis estudiantes',
+  'credenciales-finalistas': 'Credencial FINALISTAS',
   'mi-credencial': 'Mi credencial',
   historial: 'Inscripciones',
   datos: 'Mis datos',
@@ -176,6 +180,7 @@ function Contenido() {
             />
           )}
           {seccion === 'credenciales' && <SeccionCredenciales resumen={resumen} />}
+          {seccion === 'credenciales-finalistas' && <CredencialesFinalistas />}
           {seccion === 'mi-credencial' && <MiCredencial resumen={resumen} />}
           {seccion === 'examen' && examen?.habilitado && <RespuestasExamen />}
           {seccion === 'clasificacion' && clasificado && <MiClasificacion />}

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { AlertCircle, CheckCircle2, ShieldAlert, UserCog } from 'lucide-react';
 import { Aviso, Boton, Cargando, Etiqueta, Tarjeta } from './Ui.jsx';
 import { api, mensajeError } from '../lib/api';
-import { PERMISOS_COMISION, PERMISOS_RESULTADOS } from '../lib/permisos';
+import { PERMISOS_COMISION, PERMISOS_FINAL, PERMISOS_RESULTADOS } from '../lib/permisos';
 
 /**
  * Resultados · Supervisor a cargo.
@@ -178,6 +178,15 @@ function Supervisor({ supervisor, marcados, guardando, alMarcar, alMarcarGrupo, 
             : `${marcados.length} ${marcados.length === 1 ? 'módulo' : 'módulos'}`}
         </Etiqueta>
       </div>
+
+      <Grupo
+        titulo="Final macrorregional"
+        descripcion="El día del examen presencial."
+        permisos={PERMISOS_FINAL}
+        marcados={marcados}
+        alMarcar={alMarcar}
+        alMarcarTodo={(valor) => alMarcarGrupo(PERMISOS_FINAL, valor)}
+      />
 
       <Grupo
         titulo="Resultados"

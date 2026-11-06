@@ -1,18 +1,26 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertCircle,
+  Check,
   CheckCircle2,
   Download,
   FileSpreadsheet,
+  Pencil,
   Plus,
   Search,
   Trash2,
   Upload,
   Users,
+  X,
 } from 'lucide-react';
 import { api, descargar, mensajeError } from '../lib/api';
+import { useAjustes } from '../lib/ajustes';
 import { ETIQUETA_GRADO, GRADOS, gradosDeNivel } from '../lib/datos';
 import { Aviso, Boton, Campo, Selector, Tarjeta } from './Ui.jsx';
+
+/** Los campos de la fila en edición: mismo aire que `Campo`, sin etiqueta. */
+const CLASE_CELDA =
+  'w-full rounded-xl border-2 border-slate-200 bg-white px-3 py-2 text-xl text-slate-900 outline-none transition focus:border-granate-600 focus:ring-4 focus:ring-granate-100';
 
 const VACIO = { dni: '', nombres: '', grado: '' };
 
@@ -41,6 +49,15 @@ export default function GestorAlumnos({ resumen, alCambiar }) {
   const [subiendo, setSubiendo] = useState(false);
   const [importacion, setImportacion] = useState(null);
   const archivoRef = useRef(null);
+
+  // Qué alumno está en edición y con qué valores. El grado solo se mueve
+  // mientras el periodo sigue abierto: después de cerrado ya se corrigió su
+  // examen con la categoría que salió de él.
+  const { ajustes } = useAjustes();
+  const puedeCambiarGrado = !ajustes.inscripcionesCerradas;
+  const [editando, setEditando] = useState('');
+  const [borrador, setBorrador] = useState(VACIO);
+  const [guardandoEdicion, setGuardandoEdicion] = useState(false);
 
   const cargar = async () => {
     const { data } = await api.get('/alumnos');
@@ -77,6 +94,42 @@ export default function GestorAlumnos({ resumen, alCambiar }) {
     if (!window.confirm(`¿Quitar a ${nombres} de la delegación?`)) return;
     await api.delete(`/alumnos/${id}`);
     await refrescar();
+  };
+
+  const abrirEdicion = (alumno) => {
+    setError('');
+    setExito('');
+    setEditando(alumno.id);
+    setBorrador({ dni: alumno.dni, nombres: alumno.nombres, grado: alumno.grado });
+  };
+
+  const cerrarEdicion = () => {
+    setEditando('');
+    setBorrador(VACIO);
+  };
+
+  const guardarEdicion = async (alumno) => {
+    setError('');
+    setExito('');
+    setGuardandoEdicion(true);
+    try {
+      const { data } = await api.patch(`/alumnos/${alumno.id}`, borrador);
+      cerrarEdicion();
+      await refrescar();
+
+      // Si el DNI cambió, lo guardado el día del examen no lo sigue solo: el
+      // servidor avisa si tuvo que arrastrarlo, y conviene decírselo.
+      const arrastre = data?.arrastre;
+      setExito(
+        arrastre?.examen
+          ? 'Datos corregidos. Su examen ya entregado quedó con el DNI nuevo.'
+          : 'Datos del estudiante corregidos',
+      );
+    } catch (e) {
+      setError(mensajeError(e, 'No se pudieron guardar los cambios'));
+    } finally {
+      setGuardandoEdicion(false);
+    }
   };
 
   const subirExcel = async (evento) => {
@@ -348,10 +401,18 @@ export default function GestorAlumnos({ resumen, alCambiar }) {
       {/* Listado */}
       <Tarjeta>
         <div className="flex flex-wrap items-center justify-between gap-5">
-          <h3 className="flex items-center gap-3 text-3xl font-black text-slate-900">
-            <Users className="h-9 w-9 text-granate-600" />
-            Delegación ({alumnos.length})
-          </h3>
+          <div>
+            <h3 className="flex items-center gap-3 text-3xl font-black text-slate-900">
+              <Users className="h-9 w-9 text-granate-600" />
+              Delegación ({alumnos.length})
+            </h3>
+            {alumnos.length > 0 && (
+              <p className="mt-2 text-base text-slate-600">
+                ¿Un nombre mal escrito o un DNI equivocado? Use el lápiz: la corrección se
+                arrastra a su inscripción, a su examen y a sus resultados.
+              </p>
+            )}
+          </div>
           <div className="flex flex-wrap gap-3">
             <div className="relative">
               <Search className="pointer-events-none absolute left-4 top-1/2 h-6 w-6 -translate-y-1/2 text-slate-400" />
@@ -464,29 +525,117 @@ export default function GestorAlumnos({ resumen, alCambiar }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {enTabla.map((alumno) => (
-                    <tr
-                      key={alumno.id}
-                      className="border-b border-slate-100 hover:bg-granate-50/60"
-                    >
-                      <td className="py-5 pr-4 text-xl font-bold text-granate-700">{alumno.dni}</td>
-                      <td className="py-5 pr-4 text-xl text-slate-900">{alumno.nombres}</td>
-                      {!agrupado && (
-                        <td className="py-5 pr-4 text-xl text-slate-700">
-                          {ETIQUETA_GRADO[alumno.grado]}
+                  {enTabla.map((alumno) => {
+                    const enEdicion = editando === alumno.id;
+
+                    // Agrupado no hay columna de grado, así que el selector se
+                    // va debajo del nombre; si no, se queda en su columna.
+                    const selectorGrado = puedeCambiarGrado ? (
+                      <select
+                        value={borrador.grado}
+                        onChange={(e) => setBorrador({ ...borrador, grado: e.target.value })}
+                        className={CLASE_CELDA}
+                      >
+                        {grados.map((g) => (
+                          <option key={g.valor} value={g.valor}>
+                            {g.label}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <span className="block text-xl text-slate-500">
+                        {ETIQUETA_GRADO[alumno.grado]} · ya no se puede cambiar
+                      </span>
+                    );
+
+                    return (
+                      <tr
+                        key={alumno.id}
+                        className={`border-b border-slate-100 ${
+                          enEdicion ? 'bg-granate-50/60' : 'hover:bg-granate-50/60'
+                        }`}
+                      >
+                        <td className="py-5 pr-4 text-xl font-bold text-granate-700">
+                          {enEdicion ? (
+                            <input
+                              value={borrador.dni}
+                              onChange={(e) =>
+                                setBorrador({
+                                  ...borrador,
+                                  dni: e.target.value.replace(/\D/g, '').slice(0, 8),
+                                })
+                              }
+                              inputMode="numeric"
+                              aria-label="DNI del estudiante"
+                              className={`${CLASE_CELDA} max-w-[9rem] font-bold`}
+                            />
+                          ) : (
+                            alumno.dni
+                          )}
                         </td>
-                      )}
-                      <td className="py-5 text-right">
-                        <button
-                          onClick={() => eliminar(alumno.id, alumno.nombres)}
-                          aria-label="Quitar estudiante"
-                          className="rounded-xl p-3 text-rose-600 transition hover:bg-rose-50"
-                        >
-                          <Trash2 className="h-6 w-6" />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
+                        <td className="py-5 pr-4 text-xl text-slate-900">
+                          {enEdicion ? (
+                            <>
+                              <input
+                                value={borrador.nombres}
+                                onChange={(e) =>
+                                  setBorrador({ ...borrador, nombres: e.target.value })
+                                }
+                                aria-label="Nombres del estudiante"
+                                className={CLASE_CELDA}
+                              />
+                              {agrupado && <div className="mt-2">{selectorGrado}</div>}
+                            </>
+                          ) : (
+                            alumno.nombres
+                          )}
+                        </td>
+                        {!agrupado && (
+                          <td className="py-5 pr-4 text-xl text-slate-700">
+                            {enEdicion ? selectorGrado : ETIQUETA_GRADO[alumno.grado]}
+                          </td>
+                        )}
+                        <td className="py-5 text-right">
+                          {enEdicion ? (
+                            <div className="flex justify-end gap-2">
+                              <button
+                                onClick={() => guardarEdicion(alumno)}
+                                disabled={guardandoEdicion}
+                                aria-label="Guardar cambios"
+                                className="rounded-xl p-3 text-emerald-700 transition hover:bg-emerald-50 disabled:opacity-50"
+                              >
+                                <Check className="h-6 w-6" />
+                              </button>
+                              <button
+                                onClick={cerrarEdicion}
+                                aria-label="Cancelar"
+                                className="rounded-xl p-3 text-slate-500 transition hover:bg-slate-100"
+                              >
+                                <X className="h-6 w-6" />
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="flex justify-end gap-2">
+                              <button
+                                onClick={() => abrirEdicion(alumno)}
+                                aria-label="Corregir datos del estudiante"
+                                className="rounded-xl p-3 text-granate-700 transition hover:bg-granate-100"
+                              >
+                                <Pencil className="h-6 w-6" />
+                              </button>
+                              <button
+                                onClick={() => eliminar(alumno.id, alumno.nombres)}
+                                aria-label="Quitar estudiante"
+                                className="rounded-xl p-3 text-rose-600 transition hover:bg-rose-50"
+                              >
+                                <Trash2 className="h-6 w-6" />
+                              </button>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
               {enTabla.length === 0 && (

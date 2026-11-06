@@ -58,7 +58,12 @@ export class StudentsController {
     return this.students.crear(user.sub, dto);
   }
 
-  @UseGuards(JwtAuthGuard, RolesGuard, InscripcionesAbiertasGuard)
+  /**
+   * Corregir una errata no es inscribir: el nombre y el DNI se arreglan
+   * aunque el periodo ya esté cerrado, porque la falta se descubre tarde y el
+   * alumno ya rindió. El servicio es el que cuida lo que sí queda fijo.
+   */
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('TUTOR')
   @Patch(':id')
   actualizar(
@@ -66,7 +71,7 @@ export class StudentsController {
     @Param('id') id: string,
     @Body() dto: ActualizarAlumnoDto,
   ) {
-    return this.students.actualizar(user.sub, id, dto.nombres, dto.grado);
+    return this.students.actualizar(user.sub, id, dto);
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard, InscripcionesAbiertasGuard)

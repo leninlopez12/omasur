@@ -586,6 +586,50 @@ export class ExamenService {
     return nueva;
   }
 
+  /**
+   * Arregla el DNI o el nombre de un estudiante dentro de lo ya entregado.
+   *
+   * Lo entregado es una copia de lo que el tutor mandó ese día, no una
+   * referencia a su ficha: si después le corrigen el DNI, aquí seguiría el
+   * viejo y su examen quedaría colgando de un alumno que ya no existe. Por eso
+   * la corrección tiene que entrar también aquí.
+   *
+   * Se trabaja sobre lo guardado en crudo, no sobre lo que devuelve
+   * `entregaDe`, que viene recalculado: se cambia el dato pedido y nada más.
+   */
+  async renombrarAlumno(
+    tutorId: string,
+    dniAnterior: string,
+    cambios: { dni?: string; nombres?: string },
+  ) {
+    const guardado = await this.prisma.ajuste.findUnique({
+      where: { clave: CLAVE_RESPUESTAS(tutorId) },
+    });
+    if (!guardado?.valor) return false;
+
+    let entrega: any;
+    try {
+      entrega = JSON.parse(guardado.valor);
+    } catch {
+      return false;
+    }
+
+    const viejo = String(dniAnterior).trim();
+    const suya = (entrega.filas || []).find((f: Corregido) => f.dni === viejo);
+    if (!suya) return false;
+
+    if (cambios.dni) suya.dni = cambios.dni;
+    if (cambios.nombres) suya.nombres = cambios.nombres;
+
+    await this.prisma.ajuste.update({
+      where: { clave: CLAVE_RESPUESTAS(tutorId) },
+      data: { valor: JSON.stringify(entrega) },
+    });
+
+    this.log.warn(`Se corrigieron los datos de ${suya.nombres} en un envío ya recibido.`);
+    return true;
+  }
+
   // ------------------------------------------------------------------ consultas
 
   /**
