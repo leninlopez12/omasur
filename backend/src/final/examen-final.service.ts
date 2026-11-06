@@ -1,24 +1,42 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import * as ExcelJS from 'exceljs';
 import { PrismaService } from '../prisma/prisma.service';
-import { FinalService, Salon } from './final.service';
+import { FinalService, NIVEL_TEXTO, NivelFinal, Salon, idSalon } from './final.service';
 import { ALTERNATIVAS, Alternativa, PuntajesExamen } from '../examen/examen.service';
 import { GRADOS } from '../common/grados';
 import { GRANATE, escribirEncabezados, escribirTitulo, nombreArchivo } from '../common/excel';
 
 const CLAVE_CONFIG = 'examen_final_config';
-const CLAVE_RESPUESTAS = (salon: number) => `examen_final_respuestas_${salon}`;
+const CLAVE_RESPUESTAS = (salon: string) => `examen_final_respuestas_${salon}`;
 
-/** Cuántas preguntas puede tener la prueba final, como tope razonable. */
-const MAX_PREGUNTAS = 60;
+/**
+ * Cómo está armada la prueba de cada turno.
+ *
+ * Las dos tienen la misma cola de cinco preguntas de respuesta numérica, donde
+ * no hay alternativas que marcar y se escribe el número; lo que cambia es
+ * cuántas de alternativa vienen antes. Secundaria rinde una prueba más larga.
+ */
+export const ESTRUCTURA: Record<NivelFinal, { alternativas: number; numericas: number }> = {
+  SECUNDARIA: { alternativas: 15, numericas: 5 },
+  PRIMARIA: { alternativas: 10, numericas: 5 },
+};
+
+export const nivelDe = (categoria: string): NivelFinal =>
+  (GRADOS.find((g) => g.categoria === categoria)?.nivel as NivelFinal) || 'PRIMARIA';
+
+export const totalPreguntas = (nivel: NivelFinal) =>
+  ESTRUCTURA[nivel].alternativas + ESTRUCTURA[nivel].numericas;
+
+/** La clave de una categoría: lo que marcan y lo que escriben. */
+export interface ClaveCategoria {
+  alternativas: Alternativa[];
+  numericas: string[];
+}
 
 export interface ConfigExamenFinal {
-  /** Las respuestas correctas, por categoría: { A: ['A','C',...] }. */
-  claves: Record<string, Alternativa[]>;
+  claves: Record<string, ClaveCategoria>;
   puntajes: PuntajesExamen;
-  /** Cuántas preguntas trae la prueba. La institucional fueron veinte. */
-  preguntas: number;
-  /** Mientras no esté abierto, solo el administrador puede probar el envío. */
+  /** Mientras no esté abierto, solo el administrador puede subir un acta. */
   abierto: boolean;
   actualizado: string;
 }
@@ -26,7 +44,6 @@ export interface ConfigExamenFinal {
 const CONFIG_VACIA: ConfigExamenFinal = {
   claves: {},
   puntajes: { correcta: 10, blanco: 0, incorrecta: -1 },
-  preguntas: 20,
   abierto: false,
   actualizado: '',
 };
@@ -37,18 +54,25 @@ export interface CorregidoFinal {
   institucion: string;
   tutorId: string;
   categoria: string;
-  respuestas: Alternativa[];
+  nivel: NivelFinal;
+  alternativas: Alternativa[];
+  numericas: string[];
   correctas: number;
   incorrectas: number;
   blancos: number;
   puntaje: number;
+  /** Lo que escribió el responsable, tal cual: «09:47». */
+  horaEntrega: string;
+  /** Minutos desde que empezó su turno. Null si no se anotó la hora. */
+  minutos: number | null;
 }
 
 export interface EntregaSalon {
+  id: string;
   salon: number;
-  nivel: string;
-  categoria: string;
-  grado: string;
+  nivel: NivelFinal;
+  nivelTexto: string;
+  categorias: string[];
   responsable: string | null;
   enviadoEn: string | null;
   registradoPor: string;
@@ -62,16 +86,20 @@ export interface EntregaSalon {
 /**
  * El examen de la final macrorregional.
  *
- * Es el mismo oficio que el institucional, con una diferencia que cambia todo
- * lo demás: aquí no entrega el tutor por su delegación, entrega el responsable
- * por su salón. El salón es de una sola categoría, así que su plantilla tiene
- * una sola hoja y una sola clave con la que corregir.
+ * Es el mismo oficio que el institucional, con dos diferencias que cambian
+ * todo lo demás. Aquí no entrega el tutor por su delegación, entrega el
+ * responsable por su salón. Y la prueba tiene dos tramos: las de alternativa,
+ * que se marcan, y cinco de respuesta numérica, que se escriben.
  *
- * Lo guardado son las alternativas que marcó cada alumno; el puntaje se vuelve
- * a sacar en cada lectura con la clave vigente, para que corregir una clave
- * mal cargada arrastre sin que nadie reenvíe nada.
+ * Cada alumno se corrige con la clave de su categoría y no con la de su aula,
+ * porque un salón puede acabar con gente de varias si lo acomodaron a mano.
  *
- * Sin tabla nueva: una fila de `Ajuste` por salón.
+ * El acta pide además la hora a la que cada uno entregó: a igual puntaje gana
+ * quien terminó antes, y sin ese dato la final se llenaría de empates.
+ *
+ * Lo guardado son las respuestas; el puntaje se vuelve a sacar en cada lectura
+ * con la clave vigente, para que corregir una clave mal cargada arrastre sin
+ * que nadie reenvíe nada.
  */
 @Injectable()
 export class ExamenFinalService {
@@ -90,10 +118,16 @@ export class ExamenFinalService {
 
     try {
       const guardada = JSON.parse(fila.valor);
+      const claves: Record<string, ClaveCategoria> = {};
+
+      for (const [categoria, clave] of Object.entries(guardada.claves || {})) {
+        claves[categoria] = this.limpiarClave(clave, nivelDe(categoria));
+      }
+
       return {
         ...this.vacia(),
         ...guardada,
-        claves: guardada.claves || {},
+        claves,
         puntajes: { ...CONFIG_VACIA.puntajes, ...guardada.puntajes },
       };
     } catch {
@@ -103,6 +137,18 @@ export class ExamenFinalService {
 
   private vacia(): ConfigExamenFinal {
     return { ...CONFIG_VACIA, claves: {}, puntajes: { ...CONFIG_VACIA.puntajes } };
+  }
+
+  /** La estructura de la prueba, para que la pantalla arme sus casillas. */
+  estructura() {
+    return GRADOS.map((g) => ({
+      categoria: g.categoria,
+      grado: g.label,
+      nivel: g.nivel,
+      nivelTexto: NIVEL_TEXTO[g.nivel as NivelFinal],
+      ...ESTRUCTURA[g.nivel as NivelFinal],
+      total: totalPreguntas(g.nivel as NivelFinal),
+    }));
   }
 
   private async guardarConfig(config: ConfigExamenFinal) {
@@ -115,14 +161,14 @@ export class ExamenFinalService {
     return config;
   }
 
-  async guardarClave(categoria: string, respuestas: unknown) {
+  async guardarClave(categoria: string, clave: unknown) {
     const cat = String(categoria || '').trim().toUpperCase();
     if (!GRADOS.some((g) => g.categoria === cat)) {
       throw new BadRequestException('Esa categoría no existe');
     }
 
     const config = await this.config();
-    config.claves[cat] = this.limpiarClave(respuestas, config.preguntas);
+    config.claves[cat] = this.limpiarClave(clave, nivelDe(cat));
     this.log.log(`Clave de la final cargada para la CAT. ${cat}.`);
     return this.guardarConfig(config);
   }
@@ -146,24 +192,6 @@ export class ExamenFinalService {
     return this.guardarConfig(config);
   }
 
-  /**
-   * Cambiar cuántas preguntas trae la prueba recorta o rellena las claves ya
-   * cargadas: dejarlas con otro largo haría que la corrección leyera de más.
-   */
-  async guardarPreguntas(cantidad: unknown) {
-    const n = Number(cantidad);
-    if (!Number.isInteger(n) || n < 1 || n > MAX_PREGUNTAS) {
-      throw new BadRequestException(`La prueba va de 1 a ${MAX_PREGUNTAS} preguntas`);
-    }
-
-    const config = await this.config();
-    config.preguntas = n;
-    for (const cat of Object.keys(config.claves)) {
-      config.claves[cat] = this.limpiarClave(config.claves[cat], n);
-    }
-    return this.guardarConfig(config);
-  }
-
   async abrir(abierto: boolean) {
     const config = await this.config();
     config.abierto = abierto;
@@ -173,34 +201,49 @@ export class ExamenFinalService {
 
   // -------------------------------------------------------------- la plantilla
 
-  /** El Excel del salón, con su gente ya escrita y las alternativas en lista. */
-  async plantilla(numero: number): Promise<{ buffer: Buffer; nombre: string }> {
-    const salon = await this.final.salon(numero);
-    const config = await this.config();
+  /** El acta del salón, con su gente ya escrita y las casillas listas. */
+  async plantilla(nivel: string, numero: number): Promise<{ buffer: Buffer; nombre: string }> {
+    const salon = await this.final.salon(nivel, numero);
+    const forma = ESTRUCTURA[salon.nivel];
+    const mezclado = new Set(salon.alumnos.map((a) => a.categoria)).size > 1;
 
     const libro = new ExcelJS.Workbook();
     libro.creator = 'I OMASUR UNI 2026';
-    const hoja = libro.addWorksheet(`CAT. ${salon.categoria}`);
+    const hoja = libro.addWorksheet(`SALÓN ${salon.numero}`);
+
+    // N°, DNI, nombres, [cat], alternativas, numéricas, hora.
+    const colCat = mezclado ? 1 : 0;
+    const primeraAlt = 4 + colCat;
+    const primeraNum = primeraAlt + forma.alternativas;
+    const colHora = primeraNum + forma.numericas;
 
     hoja.columns = [
       { width: 6 },
       { width: 14 },
-      { width: 40 },
-      ...Array.from({ length: config.preguntas }, () => ({ width: 6 })),
+      { width: 38 },
+      ...(mezclado ? [{ width: 7 }] : []),
+      ...Array.from({ length: forma.alternativas }, () => ({ width: 6 })),
+      ...Array.from({ length: forma.numericas }, () => ({ width: 9 })),
+      { width: 15 },
     ] as any;
 
     const marca = hoja.addRow(['I - OMASUR UNI 2026 · final macrorregional']);
     marca.font = { bold: true, size: 16, color: { argb: GRANATE } };
     marca.height = 24;
 
-    const titulo = hoja.addRow([`SALÓN ${salon.numero} · CAT. ${salon.categoria} · ${salon.grado}`]);
+    const titulo = hoja.addRow([
+      `SALÓN ${salon.numero} · ${NIVEL_TEXTO[salon.nivel].toUpperCase()}`,
+    ]);
     titulo.font = { bold: true, size: 13, color: { argb: 'FF111827' } };
-    hoja.addRow(['Marque A, B, C, D, E o BLANCO en cada pregunta.']).font = {
-      size: 10,
-      italic: true,
-      color: { argb: 'FF6B7280' },
-    };
-    hoja.addRow(['Al que no se presentó, déjelo en blanco y avise en la observación.']).font = {
+
+    hoja.addRow([
+      `P1 a P${forma.alternativas}: marque A, B, C, D, E o BLANCO. ` +
+        `N1 a N${forma.numericas}: escriba el número que respondió; en blanco si no respondió.`,
+    ]).font = { size: 10, italic: true, color: { argb: 'FF6B7280' } };
+    hoja.addRow([
+      'HORA DE ENTREGA: la hora en que ese alumno entregó, en formato 09:47. A igual puntaje pasa primero quien entregó antes.',
+    ]).font = { size: 10, italic: true, color: { argb: 'FF6B7280' } };
+    hoja.addRow(['Al que no se presentó, déjelo con todo en blanco.']).font = {
       size: 10,
       italic: true,
       color: { argb: 'FF6B7280' },
@@ -211,27 +254,36 @@ export class ExamenFinalService {
       'N°',
       'DNI',
       'APELLIDOS Y NOMBRES',
-      ...Array.from({ length: config.preguntas }, (_, i) => `P${i + 1}`),
+      ...(mezclado ? ['CAT.'] : []),
+      ...Array.from({ length: forma.alternativas }, (_, i) => `P${i + 1}`),
+      ...Array.from({ length: forma.numericas }, (_, i) => `N${i + 1}`),
+      'HORA DE ENTREGA',
     ]);
     encabezado.font = { bold: true, color: { argb: 'FFFFFFFF' } };
     encabezado.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: GRANATE } };
-    encabezado.height = 22;
-    encabezado.alignment = { horizontal: 'center', vertical: 'middle' };
+    encabezado.height = 24;
+    encabezado.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
 
     const primera = encabezado.number + 1;
     salon.alumnos.forEach((a, i) => {
-      const fila = hoja.addRow([i + 1, a.dni, a.nombres]);
+      const fila = hoja.addRow([
+        i + 1,
+        a.dni,
+        a.nombres,
+        ...(mezclado ? [a.categoria] : []),
+      ]);
       fila.getCell(2).numFmt = '@';
       fila.height = 20;
     });
 
-    hoja.views = [{ state: 'frozen', xSplit: 3, ySplit: encabezado.number }];
+    hoja.views = [{ state: 'frozen', xSplit: 3 + colCat, ySplit: encabezado.number }];
 
     if (salon.alumnos.length > 0) {
       const opciones = '"' + ALTERNATIVAS.join(',') + '"';
       const ultima = primera + salon.alumnos.length - 1;
+
       for (let f = primera; f <= ultima; f++) {
-        for (let c = 4; c < 4 + config.preguntas; c++) {
+        for (let c = primeraAlt; c <= colHora; c++) {
           const celda = hoja.getCell(f, c);
           celda.alignment = { horizontal: 'center', vertical: 'middle' };
           celda.border = {
@@ -240,31 +292,51 @@ export class ExamenFinalService {
             bottom: { style: 'thin', color: { argb: 'FFE5E7EB' } },
             right: { style: 'thin', color: { argb: 'FFE5E7EB' } },
           };
-          celda.dataValidation = {
-            type: 'list',
-            allowBlank: true,
-            formulae: [opciones],
-            showErrorMessage: true,
-            errorTitle: 'Respuesta inválida',
-            error: 'Solo A, B, C, D, E o BLANCO.',
-          };
+
+          if (c < primeraNum) {
+            celda.dataValidation = {
+              type: 'list',
+              allowBlank: true,
+              formulae: [opciones],
+              showErrorMessage: true,
+              errorTitle: 'Respuesta inválida',
+              error: 'Solo A, B, C, D, E o BLANCO.',
+            };
+          } else {
+            // Las numéricas y la hora van como texto: con formato de número,
+            // Excel convierte «09:47» en una fracción de día y «007» en 7.
+            celda.numFmt = '@';
+          }
         }
       }
     }
 
     return {
       buffer: (await libro.xlsx.writeBuffer()) as unknown as Buffer,
-      nombre: nombreArchivo(`respuestas-salon-${salon.numero}`),
+      nombre: nombreArchivo(`acta-salon-${salon.numero}-${salon.nivel.toLowerCase()}`),
     };
   }
 
   // ----------------------------------------------------------------- el envío
 
   /** Lee el archivo y lo corrige, sin guardar nada. Es «probar el envío». */
-  async revisar(numero: number, archivo: Express.Multer.File) {
+  async revisar(nivel: string, numero: number, archivo: Express.Multer.File) {
     if (!archivo) throw new BadRequestException('Adjunte el Excel con las respuestas');
 
-    const [salon, config] = await Promise.all([this.final.salon(numero), this.config()]);
+    const [salon, config, { config: dia }] = await Promise.all([
+      this.final.salon(nivel, numero),
+      this.config(),
+      this.final.estado(),
+    ]);
+
+    const forma = ESTRUCTURA[salon.nivel];
+    const mezclado = new Set(salon.alumnos.map((a) => a.categoria)).size > 1;
+    const colCat = mezclado ? 1 : 0;
+    const primeraAlt = 4 + colCat;
+    const primeraNum = primeraAlt + forma.alternativas;
+    const colHora = primeraNum + forma.numericas;
+    const inicio = dia.bloques[salon.nivel].inicio;
+
     const esperados = new Map(salon.alumnos.map((a) => [a.dni, a]));
 
     const libro = new ExcelJS.Workbook();
@@ -280,7 +352,7 @@ export class ExamenFinalService {
 
     for (const hoja of libro.worksheets) {
       hoja.eachRow((fila, numeroFila) => {
-        const dni = String(fila.getCell(2).value ?? '').trim();
+        const dni = String(this.plano(fila.getCell(2).value) ?? '').trim();
         if (!dni || !/^\d{6,12}$/.test(dni)) return;
 
         const alumno = esperados.get(dni);
@@ -294,45 +366,66 @@ export class ExamenFinalService {
         }
         vistos.add(dni);
 
-        const respuestas: Alternativa[] = [];
-        for (let i = 0; i < config.preguntas; i++) {
-          const bruto = fila.getCell(4 + i).value;
-          const plano =
-            typeof bruto === 'object' && bruto !== null
-              ? (bruto as any).result ?? (bruto as any).text
-              : bruto;
-          const valor = this.comoAlternativa(plano);
-          if (valor === null && String(plano ?? '').trim() !== '') {
+        const alternativas: Alternativa[] = [];
+        for (let i = 0; i < forma.alternativas; i++) {
+          const bruto = this.plano(fila.getCell(primeraAlt + i).value);
+          const valor = this.comoAlternativa(bruto);
+          if (valor === null && String(bruto ?? '').trim() !== '') {
             errores.push(
-              `Fila ${numeroFila} (${alumno.nombres}), P${i + 1}: «${String(plano).trim()}» no es una alternativa válida.`,
+              `Fila ${numeroFila} (${alumno.nombres}), P${i + 1}: «${String(bruto).trim()}» no es una alternativa válida.`,
             );
           }
-          respuestas.push(valor ?? 'BLANCO');
+          alternativas.push(valor ?? 'BLANCO');
         }
 
-        filas.push(this.corregir(alumno, salon.categoria, respuestas, config));
+        const numericas: string[] = [];
+        for (let i = 0; i < forma.numericas; i++) {
+          numericas.push(this.comoNumero(this.plano(fila.getCell(primeraNum + i).value)));
+        }
+
+        const horaBruta = String(this.plano(fila.getCell(colHora).value) ?? '').trim();
+        const horaEntrega = this.comoHora(horaBruta);
+        if (horaBruta && !horaEntrega) {
+          errores.push(
+            `Fila ${numeroFila} (${alumno.nombres}): «${horaBruta}» no es una hora. Escríbala como 09:47.`,
+          );
+        }
+
+        filas.push(
+          this.corregir(alumno, { alternativas, numericas, horaEntrega }, config, inicio),
+        );
       });
     }
 
     // Quien no venga en el archivo es un ausente: se avisa, no se frena.
     const ausentes = salon.alumnos.filter((a) => !vistos.has(a.dni)).map((a) => a.nombres);
+    const sinHora = filas.filter((f) => f.minutos === null).map((f) => f.nombres);
+    const sinClave = [...new Set(filas.map((f) => f.categoria))].filter(
+      (c) => !config.claves[c],
+    );
 
     return {
       salon: salon.numero,
-      categoria: salon.categoria,
-      grado: salon.grado,
-      filas: filas.sort((a, b) => b.puntaje - a.puntaje || a.nombres.localeCompare(b.nombres, 'es')),
+      nivel: salon.nivel,
+      nivelTexto: NIVEL_TEXTO[salon.nivel],
+      forma,
+      filas: filas.sort(
+        (a, b) =>
+          b.puntaje - a.puntaje ||
+          (a.minutos ?? Infinity) - (b.minutos ?? Infinity) ||
+          a.nombres.localeCompare(b.nombres, 'es'),
+      ),
       errores,
       ausentes,
+      sinHora,
+      sinClave,
       puntajes: config.puntajes,
-      preguntas: config.preguntas,
-      clave: config.claves[salon.categoria] || null,
-      sinClave: !config.claves[salon.categoria],
     };
   }
 
   /** Lo mismo, guardando. */
   async registrar(
+    nivel: string,
     numero: number,
     archivo: Express.Multer.File,
     autor: { nombre: string; esAdmin: boolean },
@@ -342,7 +435,7 @@ export class ExamenFinalService {
       throw new BadRequestException('El envío de respuestas de la final todavía no está abierto.');
     }
 
-    const revision = await this.revisar(numero, archivo);
+    const revision = await this.revisar(nivel, numero, archivo);
     if (revision.errores.length > 0) {
       throw new BadRequestException('Corrija los errores del archivo antes de enviarlo.');
     }
@@ -352,70 +445,76 @@ export class ExamenFinalService {
 
     const registro = {
       salon: revision.salon,
-      categoria: revision.categoria,
+      nivel: revision.nivel,
       enviadoEn: new Date().toISOString(),
       registradoPor: autor.nombre,
       filas: revision.filas,
     };
 
-    const clave = CLAVE_RESPUESTAS(revision.salon);
+    const clave = CLAVE_RESPUESTAS(idSalon(revision.nivel, revision.salon));
     await this.prisma.ajuste.upsert({
       where: { clave },
       create: { clave, valor: JSON.stringify(registro) },
       update: { valor: JSON.stringify(registro) },
     });
 
-    this.log.log(`Salón ${revision.salon}: ${revision.filas.length} respuestas de la final.`);
+    this.log.log(`Salón ${revision.salon} (${revision.nivel}): ${revision.filas.length} respuestas.`);
     return {
       ok: true,
       total: revision.filas.length,
       ausentes: revision.ausentes.length,
+      sinHora: revision.sinHora.length,
       enviadoEn: registro.enviadoEn,
     };
   }
 
-  async anular(numero: number) {
-    const entrega = await this.entregaDe(numero);
+  async anular(nivel: string, numero: number) {
+    const entrega = await this.entregaDe(nivel, numero);
     if (!entrega) throw new NotFoundException('Ese salón todavía no envió respuestas');
 
-    await this.prisma.ajuste.delete({ where: { clave: CLAVE_RESPUESTAS(Number(numero)) } });
-    this.log.warn(`Se anuló el envío del salón ${numero}.`);
+    await this.prisma.ajuste.delete({
+      where: { clave: CLAVE_RESPUESTAS(idSalon(nivel as NivelFinal, Number(numero))) },
+    });
+    this.log.warn(`Se anuló el envío del salón ${numero} (${nivel}).`);
     return { ok: true, salon: Number(numero), total: entrega.filas.length };
   }
 
   /** Lo entregado por un salón, vuelto a corregir con la clave de ahora. */
-  async entregaDe(numero: number, config?: ConfigExamenFinal) {
+  async entregaDe(nivel: string, numero: number, config?: ConfigExamenFinal) {
     const fila = await this.prisma.ajuste.findUnique({
-      where: { clave: CLAVE_RESPUESTAS(Number(numero)) },
+      where: { clave: CLAVE_RESPUESTAS(idSalon(nivel as NivelFinal, Number(numero))) },
     });
     if (!fila?.valor) return null;
 
     try {
-      return this.recorregir(JSON.parse(fila.valor), config ?? (await this.config()));
+      const dia = await this.final.config();
+      return this.recorregir(
+        JSON.parse(fila.valor),
+        config ?? (await this.config()),
+        dia.bloques[nivel as NivelFinal].inicio,
+      );
     } catch {
       return null;
     }
   }
 
-  private recorregir(entrega: any, config: ConfigExamenFinal) {
+  private recorregir(entrega: any, config: ConfigExamenFinal, inicio: string) {
     const filas: CorregidoFinal[] = entrega?.filas || [];
     return {
       ...entrega,
       puntajes: config.puntajes,
-      filas: filas.map((f) =>
-        this.corregir(f, entrega.categoria || f.categoria, f.respuestas, config),
-      ),
+      filas: filas.map((f) => this.corregir(f, f, config, inicio)),
     };
   }
 
-  async corregirAlumno(numero: number, dni: string, respuestas: unknown) {
-    const guardado = await this.prisma.ajuste.findUnique({
-      where: { clave: CLAVE_RESPUESTAS(Number(numero)) },
-    });
+  async corregirAlumno(nivel: string, numero: number, dni: string, datos: any) {
+    const clave = CLAVE_RESPUESTAS(idSalon(nivel as NivelFinal, Number(numero)));
+    const guardado = await this.prisma.ajuste.findUnique({ where: { clave } });
     if (!guardado?.valor) throw new NotFoundException('Ese salón todavía no envió respuestas');
 
     const entrega = JSON.parse(guardado.valor);
     const config = await this.config();
+    const dia = await this.final.config();
     const fila = (entrega.filas || []).find(
       (f: CorregidoFinal) => f.dni === String(dni).trim(),
     );
@@ -423,17 +522,18 @@ export class ExamenFinalService {
 
     const nueva = this.corregir(
       fila,
-      entrega.categoria || fila.categoria,
-      this.limpiarClave(respuestas, config.preguntas),
+      {
+        alternativas: datos?.alternativas ?? fila.alternativas,
+        numericas: datos?.numericas ?? fila.numericas,
+        horaEntrega: datos?.horaEntrega ?? fila.horaEntrega,
+      },
       config,
+      dia.bloques[nivel as NivelFinal].inicio,
     );
+
     entrega.filas = entrega.filas.map((f: CorregidoFinal) => (f.dni === fila.dni ? nueva : f));
     entrega.corregidoEn = new Date().toISOString();
-
-    await this.prisma.ajuste.update({
-      where: { clave: CLAVE_RESPUESTAS(Number(numero)) },
-      data: { valor: JSON.stringify(entrega) },
-    });
+    await this.prisma.ajuste.update({ where: { clave }, data: { valor: JSON.stringify(entrega) } });
 
     this.log.warn(`Se corrigieron las respuestas de ${fila.nombres} en el salón ${numero}.`);
     return nueva;
@@ -448,31 +548,35 @@ export class ExamenFinalService {
       where: { clave: { startsWith: 'examen_final_respuestas_' } },
     });
 
-    const porSalon = new Map<number, any>();
+    const porSalon = new Map<string, any>();
     for (const f of filas) {
       try {
-        const d = this.recorregir(JSON.parse(f.valor), config);
-        porSalon.set(Number(d.salon), d);
+        porSalon.set(f.clave.replace('examen_final_respuestas_', ''), JSON.parse(f.valor));
       } catch {
         /* una fila ilegible no puede tumbar el tablero */
       }
     }
 
     return salones.map((s) => {
-      const entrega = porSalon.get(s.numero);
-      const puntajes: number[] = (entrega?.filas || []).map((x: CorregidoFinal) => x.puntaje);
+      const guardada = porSalon.get(s.id);
+      const inicio = s.horario.inicio;
+      const filas: CorregidoFinal[] = (guardada?.filas || []).map((f: CorregidoFinal) =>
+        this.corregir(f, f, config, inicio),
+      );
+      const puntajes = filas.map((x) => x.puntaje);
 
       return {
+        id: s.id,
         salon: s.numero,
         nivel: s.nivel,
-        categoria: s.categoria,
-        grado: s.grado,
+        nivelTexto: NIVEL_TEXTO[s.nivel],
+        categorias: s.categorias,
         responsable: s.responsable?.nombre || null,
-        enviadoEn: entrega?.enviadoEn || null,
-        registradoPor: entrega?.registradoPor || '',
+        enviadoEn: guardada?.enviadoEn || null,
+        registradoPor: guardada?.registradoPor || '',
         esperados: s.total,
-        recibidos: puntajes.length,
-        ausentes: entrega ? Math.max(0, s.total - puntajes.length) : 0,
+        recibidos: filas.length,
+        ausentes: guardada ? Math.max(0, s.total - filas.length) : 0,
         puntajeAlto: puntajes.length ? Math.max(...puntajes) : 0,
         promedio: puntajes.length
           ? Math.round((puntajes.reduce((a, b) => a + b, 0) / puntajes.length) * 100) / 100
@@ -482,17 +586,30 @@ export class ExamenFinalService {
   }
 
   /** Todas las respuestas recibidas, ya corregidas y con su salón al lado. */
-  async todas(): Promise<(CorregidoFinal & { salon: number; nivel: string })[]> {
+  async todas(): Promise<(CorregidoFinal & { salon: number })[]> {
     const [{ salones }, config] = await Promise.all([this.final.estado(), this.config()]);
-    const lista: (CorregidoFinal & { salon: number; nivel: string })[] = [];
-
-    for (const s of salones) {
-      const entrega = await this.entregaDe(s.numero, config);
-      for (const fila of entrega?.filas || []) {
-        lista.push({ ...fila, salon: s.numero, nivel: s.nivel });
+    const filas = await this.prisma.ajuste.findMany({
+      where: { clave: { startsWith: 'examen_final_respuestas_' } },
+    });
+    const porSalon = new Map<string, any>();
+    for (const f of filas) {
+      try {
+        porSalon.set(f.clave.replace('examen_final_respuestas_', ''), JSON.parse(f.valor));
+      } catch {
+        /* se ignora */
       }
     }
 
+    const lista: (CorregidoFinal & { salon: number })[] = [];
+    for (const s of salones) {
+      const guardada = porSalon.get(s.id);
+      for (const fila of guardada?.filas || []) {
+        lista.push({
+          ...this.corregir(fila, fila, config, s.horario.inicio),
+          salon: s.numero,
+        });
+      }
+    }
     return lista;
   }
 
@@ -500,9 +617,11 @@ export class ExamenFinalService {
     const entregas = await this.entregas();
     const recibidos = entregas.reduce((n, e) => n + e.recibidos, 0);
     const esperados = entregas.reduce((n, e) => n + e.esperados, 0);
+    const config = await this.config();
 
     return {
       salones: entregas,
+      claves: Object.keys(config.claves).sort(),
       resumen: {
         salones: entregas.length,
         entregados: entregas.filter((e) => e.enviadoEn).length,
@@ -511,30 +630,30 @@ export class ExamenFinalService {
         recibidos,
         ausentes: entregas.filter((e) => e.enviadoEn).reduce((n, e) => n + e.ausentes, 0),
       },
-      porCategoria: [...new Set(entregas.map((e) => e.categoria))].sort().map((categoria) => {
-        const suyos = entregas.filter((e) => e.categoria === categoria);
+      porNivel: ['SECUNDARIA', 'PRIMARIA'].map((nivel) => {
+        const suyos = entregas.filter((e) => e.nivel === nivel);
         return {
-          categoria,
-          grado: suyos[0]?.grado || '',
+          nivel,
+          texto: NIVEL_TEXTO[nivel as NivelFinal],
           salones: suyos.length,
+          entregados: suyos.filter((e) => e.enviadoEn).length,
           esperados: suyos.reduce((n, e) => n + e.esperados, 0),
           recibidos: suyos.reduce((n, e) => n + e.recibidos, 0),
-          completo: suyos.every((e) => e.enviadoEn),
         };
-      }),
+      }).filter((n) => n.salones > 0),
     };
   }
 
   // --------------------------------------------------------------------- Excel
 
   /** Las respuestas de un salón, pregunta por pregunta y con su acierto. */
-  async excelEnviadas(numero: number): Promise<{ buffer: Buffer; nombre: string }> {
+  async excelEnviadas(nivel: string, numero: number): Promise<{ buffer: Buffer; nombre: string }> {
     const config = await this.config();
-    const entrega = await this.entregaDe(numero, config);
+    const entrega = await this.entregaDe(nivel, numero, config);
     if (!entrega) throw new NotFoundException('Ese salón todavía no envió respuestas');
 
-    const salon = await this.final.salon(numero);
-    const clave = config.claves[salon.categoria] || [];
+    const salon = await this.final.salon(nivel, numero);
+    const forma = ESTRUCTURA[salon.nivel];
 
     const libro = new ExcelJS.Workbook();
     libro.creator = 'I OMASUR UNI 2026';
@@ -543,9 +662,13 @@ export class ExamenFinalService {
     const columnas = [
       { header: 'N°', width: 6 },
       { header: 'DNI', width: 14 },
-      { header: 'APELLIDOS Y NOMBRES', width: 36 },
-      { header: 'INSTITUCIÓN', width: 32 },
-      ...Array.from({ length: config.preguntas }, (_, i) => ({ header: `P${i + 1}`, width: 6 })),
+      { header: 'APELLIDOS Y NOMBRES', width: 34 },
+      { header: 'CAT.', width: 7 },
+      { header: 'INSTITUCIÓN', width: 30 },
+      ...Array.from({ length: forma.alternativas }, (_, i) => ({ header: `P${i + 1}`, width: 6 })),
+      ...Array.from({ length: forma.numericas }, (_, i) => ({ header: `N${i + 1}`, width: 8 })),
+      { header: 'ENTREGÓ', width: 11 },
+      { header: 'MIN.', width: 8 },
       { header: 'ACIERTOS', width: 11 },
       { header: 'ERRORES', width: 11 },
       { header: 'BLANCOS', width: 11 },
@@ -555,19 +678,24 @@ export class ExamenFinalService {
     escribirTitulo(
       hoja,
       columnas.length,
-      `Respuestas · SALÓN ${salon.numero} · CAT. ${salon.categoria} · ${salon.grado}`,
+      `Respuestas · SALÓN ${salon.numero} · ${NIVEL_TEXTO[salon.nivel].toUpperCase()}`,
       `Final macrorregional · enviadas por ${entrega.registradoPor || 'la comisión'}`,
       entrega.filas.length,
     );
     escribirEncabezados(hoja, columnas);
 
     entrega.filas.forEach((f: CorregidoFinal, i: number) => {
+      const clave = config.claves[f.categoria];
       const fila = hoja.addRow([
         i + 1,
         f.dni,
         f.nombres,
+        f.categoria,
         f.institucion,
-        ...f.respuestas,
+        ...f.alternativas,
+        ...f.numericas.map((n) => n || '—'),
+        f.horaEntrega || '—',
+        f.minutos ?? '—',
         f.correctas,
         f.incorrectas,
         f.blancos,
@@ -576,12 +704,22 @@ export class ExamenFinalService {
       fila.getCell(2).numFmt = '@';
       fila.getCell(columnas.length).font = { bold: true, color: { argb: GRANATE } };
 
-      f.respuestas.forEach((r, j) => {
-        const celda = fila.getCell(5 + j);
+      f.alternativas.forEach((r, j) => {
+        const celda = fila.getCell(6 + j);
         celda.alignment = { horizontal: 'center' };
-        if (clave[j] && r === clave[j]) {
+        if (clave?.alternativas[j] && r === clave.alternativas[j]) {
           celda.font = { bold: true, color: { argb: 'FF047857' } };
-        } else if (r !== 'BLANCO' && clave[j]) {
+        } else if (r !== 'BLANCO' && clave) {
+          celda.font = { color: { argb: 'FF9CA3AF' } };
+        }
+      });
+
+      f.numericas.forEach((r, j) => {
+        const celda = fila.getCell(6 + forma.alternativas + j);
+        celda.alignment = { horizontal: 'center' };
+        if (clave && r && this.mismoNumero(r, clave.numericas[j])) {
+          celda.font = { bold: true, color: { argb: 'FF047857' } };
+        } else if (r && clave) {
           celda.font = { color: { argb: 'FF9CA3AF' } };
         }
       });
@@ -589,7 +727,7 @@ export class ExamenFinalService {
 
     return {
       buffer: (await libro.xlsx.writeBuffer()) as unknown as Buffer,
-      nombre: nombreArchivo(`respuestas-enviadas-salon-${salon.numero}`),
+      nombre: nombreArchivo(`respuestas-salon-${salon.numero}-${salon.nivel.toLowerCase()}`),
     };
   }
 
@@ -602,10 +740,9 @@ export class ExamenFinalService {
     const hoja = libro.addWorksheet('Consolidado');
 
     const columnas = [
+      { header: 'TURNO', width: 14 },
       { header: 'SALÓN', width: 10 },
-      { header: 'NIVEL', width: 14 },
-      { header: 'CAT.', width: 8 },
-      { header: 'GRADO', width: 20 },
+      { header: 'CATEGORÍAS', width: 16 },
       { header: 'RESPONSABLE', width: 30 },
       { header: 'ESPERADOS', width: 12 },
       { header: 'RECIBIDOS', width: 12 },
@@ -626,10 +763,9 @@ export class ExamenFinalService {
 
     salones.forEach((s) => {
       const fila = hoja.addRow([
+        s.nivelTexto,
         s.salon,
-        s.nivel === 'SECUNDARIA' ? 'Secundaria' : 'Primaria',
-        s.categoria,
-        s.grado,
+        s.categorias.join(', ') || '—',
         s.responsable || 'Sin asignar',
         s.esperados,
         s.recibidos,
@@ -638,7 +774,7 @@ export class ExamenFinalService {
         s.promedio,
         s.enviadoEn ? 'Entregado' : 'Pendiente',
       ]);
-      fila.getCell(11).font = {
+      fila.getCell(10).font = {
         bold: true,
         color: { argb: s.enviadoEn ? 'FF047857' : 'FFB91C1C' },
       };
@@ -652,50 +788,132 @@ export class ExamenFinalService {
 
   // -------------------------------------------------------------------- apoyos
 
+  /**
+   * Corrige a un alumno con la clave de su categoría.
+   *
+   * No con la de su aula: después de acomodar a mano un salón puede llevar
+   * gente de varias, y cada uno rindió la prueba de la suya.
+   */
   private corregir(
-    alumno: { dni: string; nombres: string; institucion?: string; tutorId?: string },
-    categoria: string,
-    respuestas: Alternativa[],
+    alumno: { dni: string; nombres: string; institucion?: string; tutorId?: string; categoria: string },
+    respuestas: { alternativas: unknown; numericas: unknown; horaEntrega?: string },
     config: ConfigExamenFinal,
+    inicioTurno: string,
   ): CorregidoFinal {
-    const clave = config.claves[categoria];
+    const nivel = nivelDe(alumno.categoria);
+    const forma = ESTRUCTURA[nivel];
+    const clave = config.claves[alumno.categoria];
+
+    const alternativas = Array.from({ length: forma.alternativas }, (_, i) =>
+      this.comoAlternativa((respuestas.alternativas as any[])?.[i]) ?? 'BLANCO',
+    );
+    const numericas = Array.from({ length: forma.numericas }, (_, i) =>
+      this.comoNumero((respuestas.numericas as any[])?.[i]),
+    );
+
     let correctas = 0;
     let incorrectas = 0;
     let blancos = 0;
 
-    respuestas.forEach((r, i) => {
+    alternativas.forEach((r, i) => {
       if (r === 'BLANCO') blancos += 1;
-      else if (clave && clave[i] === r) correctas += 1;
+      else if (clave && clave.alternativas[i] === r) correctas += 1;
+      else if (clave) incorrectas += 1;
+    });
+
+    numericas.forEach((r, i) => {
+      if (!r) blancos += 1;
+      else if (clave && this.mismoNumero(r, clave.numericas[i])) correctas += 1;
       else if (clave) incorrectas += 1;
     });
 
     const p = config.puntajes;
+    const horaEntrega = this.comoHora(respuestas.horaEntrega) || '';
+
     return {
       dni: alumno.dni,
       nombres: alumno.nombres,
       institucion: alumno.institucion || '',
       tutorId: alumno.tutorId || '',
-      categoria,
-      respuestas,
+      categoria: alumno.categoria,
+      nivel,
+      alternativas,
+      numericas,
       correctas,
       incorrectas,
       blancos,
       puntaje: correctas * p.correcta + blancos * p.blanco + incorrectas * p.incorrecta,
+      horaEntrega,
+      minutos: this.minutosDesde(inicioTurno, horaEntrega),
     };
   }
 
-  private limpiarClave(respuestas: unknown, preguntas: number): Alternativa[] {
-    const lista = Array.isArray(respuestas) ? respuestas : [];
-    return Array.from(
-      { length: preguntas },
-      (_, i) => this.comoAlternativa(lista[i]) ?? 'BLANCO',
-    );
+  /** La clave con el largo que le toca a su nivel, ni más ni menos. */
+  private limpiarClave(clave: unknown, nivel: NivelFinal): ClaveCategoria {
+    const forma = ESTRUCTURA[nivel];
+    const bruto = (clave || {}) as any;
+    const alt = Array.isArray(bruto.alternativas) ? bruto.alternativas : [];
+    const num = Array.isArray(bruto.numericas) ? bruto.numericas : [];
+
+    return {
+      alternativas: Array.from(
+        { length: forma.alternativas },
+        (_, i) => this.comoAlternativa(alt[i]) ?? 'BLANCO',
+      ),
+      numericas: Array.from({ length: forma.numericas }, (_, i) => this.comoNumero(num[i])),
+    };
+  }
+
+  /** Una celda de Excel puede venir como fórmula o como texto enriquecido. */
+  private plano(valor: unknown) {
+    if (valor && typeof valor === 'object') {
+      const o = valor as any;
+      return o.result ?? o.text ?? (Array.isArray(o.richText) ? o.richText.map((t: any) => t.text).join('') : valor);
+    }
+    return valor;
   }
 
   private comoAlternativa(valor: unknown): Alternativa | null {
-    const texto = String(valor ?? '').trim().toUpperCase();
+    const texto = String(this.plano(valor) ?? '').trim().toUpperCase();
     if (!texto) return null;
     if (texto === 'BLANCO' || texto === 'EN BLANCO' || texto === '-') return 'BLANCO';
     return (ALTERNATIVAS as readonly string[]).includes(texto) ? (texto as Alternativa) : null;
+  }
+
+  /** La respuesta numérica se guarda como la escribieron, ya normalizada. */
+  private comoNumero(valor: unknown): string {
+    const texto = String(this.plano(valor) ?? '')
+      .trim()
+      .replace(',', '.');
+    if (!texto || texto === '-') return '';
+    return texto.slice(0, 20);
+  }
+
+  /** Dos números son el mismo aunque uno traiga ceros o decimales de más. */
+  private mismoNumero(a: string, b: string) {
+    if (!a || !b) return false;
+    const na = Number(a);
+    const nb = Number(b);
+    if (Number.isFinite(na) && Number.isFinite(nb)) return Math.abs(na - nb) < 1e-9;
+    return a.trim().toUpperCase() === b.trim().toUpperCase();
+  }
+
+  private comoHora(valor: unknown): string {
+    const texto = String(this.plano(valor) ?? '').trim();
+    const m = texto.match(/^(\d{1,2}):(\d{2})/);
+    if (!m) return '';
+    const h = Number(m[1]);
+    const min = Number(m[2]);
+    if (h > 23 || min > 59) return '';
+    return `${String(h).padStart(2, '0')}:${m[2]}`;
+  }
+
+  /** Cuántos minutos tardó desde que empezó su turno. */
+  private minutosDesde(inicio: string, entrega: string): number | null {
+    if (!entrega) return null;
+    const [hi, mi] = inicio.split(':').map(Number);
+    const [he, me] = entrega.split(':').map(Number);
+    if ([hi, mi, he, me].some((n) => !Number.isFinite(n))) return null;
+    return he * 60 + me - (hi * 60 + mi);
   }
 }

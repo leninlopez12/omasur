@@ -15,6 +15,7 @@ import {
   Medal,
   Megaphone,
   PencilLine,
+  Printer,
   Search,
   Trophy,
   Upload,
@@ -51,6 +52,7 @@ import {
 import FinalSalones from '../components/FinalSalones.jsx';
 import FinalReparto from '../components/FinalReparto.jsx';
 import FinalCredenciales from '../components/FinalCredenciales.jsx';
+import FinalListas from '../components/FinalListas.jsx';
 import {
   FinalExamenClave,
   FinalExamenEnvios,
@@ -108,6 +110,7 @@ const SECCION_EXAMEN_FINAL = {
   hijos: [
     { id: 'final-salones', texto: 'Salones y horarios', icono: DoorOpen },
     { id: 'final-reparto', texto: 'Reparto de alumnos', icono: ArrowRightLeft },
+    { id: 'final-listas', texto: 'Lista de salones', icono: Printer },
     { id: 'final-clave', texto: 'Respuestas correctas', icono: ListChecks },
     { id: 'final-puntaje', texto: 'Puntaje y apertura', icono: Calculator },
     { id: 'final-llenar', texto: 'Llenar por salón', icono: Upload },
@@ -141,6 +144,7 @@ const TITULOS = {
   ...TITULOS_COMISION,
   'final-salones': 'Final · Salones y horarios',
   'final-reparto': 'Final · Reparto de alumnos',
+  'final-listas': 'Final · Lista de salones para el examen',
   'final-clave': 'Final · Respuestas correctas',
   'final-puntaje': 'Final · Puntaje y apertura',
   'final-llenar': 'Final · Llenar por salón',
@@ -206,6 +210,7 @@ function Contenido() {
 
       {seccion === 'final-salones' && <FinalSalones />}
       {seccion === 'final-reparto' && <FinalReparto />}
+      {seccion === 'final-listas' && <FinalListas />}
       {seccion === 'final-clave' && <FinalExamenClave />}
       {seccion === 'final-puntaje' && <FinalExamenPuntaje />}
       {seccion === 'final-llenar' && <FinalExamenLlenar />}

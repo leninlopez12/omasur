@@ -211,8 +211,9 @@ export default function FinalCredenciales() {
             >
               <option value="">Todos los salones</option>
               {salones.map((s) => (
-                <option key={s.numero} value={s.numero}>
-                  SALÓN {s.numero} · {NIVEL[s.nivel]} · CAT. {s.categoria} · {s.total} alumnos
+                <option key={s.id} value={s.id}>
+                  SALÓN {s.numero} · {NIVEL[s.nivel]} · {s.total} alumnos
+                  {s.categorias?.length ? ` · CAT. ${s.categorias.join(', ')}` : ''}
                 </option>
               ))}
             </Selector>
@@ -223,8 +224,10 @@ export default function FinalCredenciales() {
             onClick={() =>
               bajar(
                 'pdf',
-                `/final/credencial/pdf${salon ? `?salon=${salon}` : ''}`,
-                salon ? `credenciales-salon-${salon}.pdf` : 'credenciales-finalistas.pdf',
+                salon
+                  ? `/final/credencial/pdf?nivel=${salon.split('-')[0]}&salon=${salon.split('-')[1]}`
+                  : '/final/credencial/pdf',
+                salon ? `credenciales-salon-${salon.split('-')[1]}.pdf` : 'credenciales-finalistas.pdf',
               )
             }
           >

@@ -3,7 +3,6 @@ import {
   AlertCircle,
   CheckCircle2,
   Clock,
-  Download,
   DoorOpen,
   RefreshCw,
   Trash2,
@@ -11,11 +10,12 @@ import {
   Users,
 } from 'lucide-react';
 import { Aviso, Boton, Campo, Cargando, Etiqueta, Selector, Tarjeta } from './Ui.jsx';
-import { api, descargar, mensajeError } from '../lib/api';
+import { api, mensajeError } from '../lib/api';
 
 export const NIVEL = { SECUNDARIA: 'Secundaria', PRIMARIA: 'Primaria' };
+export const NIVELES = ['SECUNDARIA', 'PRIMARIA'];
 
-const COLOR_NIVEL = {
+export const COLOR_NIVEL = {
   SECUNDARIA: 'bg-sky-100 text-sky-800',
   PRIMARIA: 'bg-emerald-100 text-emerald-800',
 };
@@ -23,9 +23,10 @@ const COLOR_NIVEL = {
 /**
  * Final macrorregional · Salones y horarios.
  *
- * Todo lo del día del examen sale de aquí: a qué hora entra cada nivel, en qué
- * aula se sienta cada alumno y quién la vigila. El reparto se arma una vez y
- * se queda guardado, porque de él salen las listas que se pegan en las puertas.
+ * El día del examen se arma aquí: a qué hora entra cada turno, de a cuántos
+ * por aula y quién vigila cada una. Los dos turnos numeran desde el mismo
+ * primer salón porque son las mismas aulas: el 101 de las 8:30 y el 101 de las
+ * 10:30 son la misma puerta con gente distinta.
  */
 export default function FinalSalones() {
   const [datos, setDatos] = useState(null);
@@ -77,7 +78,7 @@ export default function FinalSalones() {
 
   const generar = async () => {
     const texto = resumen.generadoEn
-      ? 'Se vuelve a repartir a todos los clasificados.\n\nLas listas que ya imprimió dejan de servir. ¿Continuar?'
+      ? 'Se vuelve a repartir a todos los clasificados y se pierde lo que acomodó a mano.\n\n¿Continuar?'
       : `Se repartirá a ${resumen.clasificados} clasificados en salones de ${borrador.capacidad}. ¿Continuar?`;
     if (!window.confirm(texto)) return;
 
@@ -111,24 +112,16 @@ export default function FinalSalones() {
     }
   };
 
-  const asignar = async (numero, responsableId) => {
+  const asignar = async (salon, responsableId) => {
     setError('');
     try {
-      const { data } = await api.post(`/final/salones/${numero}/responsable`, { responsableId });
+      const { data } = await api.post(
+        `/final/salones/${salon.nivel}/${salon.numero}/responsable`,
+        { responsableId },
+      );
       setDatos(data);
     } catch (e) {
       setError(mensajeError(e, 'No se pudo asignar'));
-    }
-  };
-
-  const bajar = async (numero) => {
-    setProcesando(numero ? `excel-${numero}` : 'excel');
-    try {
-      await descargar(`/final/salones/excel${numero ? `?salon=${numero}` : ''}`);
-    } catch (e) {
-      setError(mensajeError(e, 'No se pudo descargar'));
-    } finally {
-      setProcesando('');
     }
   };
 
@@ -144,7 +137,7 @@ export default function FinalSalones() {
         <h3 className="text-3xl font-black text-slate-900">Salones y horarios</h3>
         <p className="mt-2 text-xl text-slate-600">
           A la final llega quien clasificó en la etapa institucional. Aquí se decide a qué hora
-          entra cada nivel, en qué aula se sienta cada uno y quién la vigila.
+          entra cada turno, de a cuántos por aula y quién la vigila.
         </p>
       </Tarjeta>
 
@@ -155,8 +148,8 @@ export default function FinalSalones() {
           El día
         </h4>
         <p className="mt-2 text-base text-slate-600">
-          Secundaria rinde primero y primaria después. Los salones se numeran en ese mismo orden,
-          así el número del aula ya dice a qué hora se entra.
+          Secundaria rinde primero y primaria después, en las mismas aulas. Por eso los dos turnos
+          numeran desde el mismo primer salón.
         </p>
 
         <div className="mt-6 grid gap-5 sm:grid-cols-2">
@@ -168,14 +161,14 @@ export default function FinalSalones() {
           />
           <Campo
             etiqueta="Fecha"
-            placeholder="2026-11-08"
+            placeholder="08 de noviembre de 2026"
             value={borrador.fecha}
             onChange={(e) => setBorrador({ ...borrador, fecha: e.target.value })}
           />
         </div>
 
         <div className="mt-5 grid gap-5 sm:grid-cols-2">
-          {['SECUNDARIA', 'PRIMARIA'].map((nivel) => (
+          {NIVELES.map((nivel) => (
             <div key={nivel} className="rounded-2xl border-2 border-slate-200 p-5">
               <Etiqueta compacto className={COLOR_NIVEL[nivel]}>
                 {NIVEL[nivel]} · todas las categorías
@@ -206,9 +199,9 @@ export default function FinalSalones() {
             onChange={(e) => setBorrador({ ...borrador, capacidad: e.target.value })}
           />
           <Campo
-            etiqueta="Primer salón"
+            etiqueta="Primer salón de cada turno"
             type="number"
-            ayuda="De ahí para arriba, uno por uno."
+            ayuda="De ahí para arriba, uno por uno, en los dos turnos."
             value={borrador.primerSalon}
             onChange={(e) => setBorrador({ ...borrador, primerSalon: e.target.value })}
           />
@@ -227,11 +220,11 @@ export default function FinalSalones() {
           <div>
             <h4 className="flex items-center gap-3 text-xl font-black text-slate-900">
               <DoorOpen className="h-6 w-6 text-granate-600" />
-              El reparto
+              El reparto automático
             </h4>
             <p className="mt-2 text-base text-slate-600">
-              Categoría por categoría, en orden alfabético, de a {borrador.capacidad}. Un salón
-              lleva una sola categoría: cada una rinde su propia prueba.
+              Categoría por categoría, en orden alfabético, de a {borrador.capacidad}. Después se
+              acomoda a mano en Reparto de alumnos.
             </p>
           </div>
           <div className="flex flex-wrap gap-3">
@@ -256,7 +249,7 @@ export default function FinalSalones() {
           <div className="mt-6">
             <Aviso tipo="alerta" icono={AlertCircle} compacto>
               El reparto tiene {resumen.repartidos} alumnos y hoy hay {resumen.clasificados}{' '}
-              clasificados. Vuelva a repartir antes de imprimir las listas.
+              clasificados. Siente a los que faltan en Reparto de alumnos, o vuelva a repartir.
             </Aviso>
           </div>
         )}
@@ -286,7 +279,7 @@ export default function FinalSalones() {
             {niveles.map((n) => (
               <div key={n.nivel} className="rounded-2xl border-2 border-slate-200 p-5">
                 <Etiqueta compacto className={COLOR_NIVEL[n.nivel]}>
-                  {NIVEL[n.nivel]}
+                  {n.texto}
                 </Etiqueta>
                 <p className="mt-3 text-xl font-black text-slate-900">
                   {n.horario.inicio} a {n.horario.fin}
@@ -296,18 +289,6 @@ export default function FinalSalones() {
                 </p>
               </div>
             ))}
-          </div>
-        )}
-
-        {resumen.salones > 0 && (
-          <div className="mt-6">
-            <Boton variante="excel" cargando={procesando === 'excel'} onClick={() => bajar()}>
-              <Download className="h-6 w-6" />
-              Listas de todos los salones
-            </Boton>
-            <p className="mt-3 text-base text-slate-500">
-              Una hoja por aula, con su horario y una columna de firma. Es lo que se imprime.
-            </p>
           </div>
         )}
       </Tarjeta>
@@ -323,8 +304,8 @@ export default function FinalSalones() {
         </Aviso>
       )}
 
-      {/* ------------------------------------------------------ aula por aula */}
-      {['SECUNDARIA', 'PRIMARIA'].map((nivel) => {
+      {/* ------------------------------------------------ quién vigila cada aula */}
+      {NIVELES.map((nivel) => {
         const suyos = salones.filter((s) => s.nivel === nivel);
         if (suyos.length === 0) return null;
 
@@ -342,7 +323,7 @@ export default function FinalSalones() {
             <div className="mt-6 space-y-3">
               {suyos.map((s) => (
                 <div
-                  key={s.numero}
+                  key={s.id}
                   className="flex flex-wrap items-center gap-4 rounded-2xl border-2 border-slate-200 p-4"
                 >
                   <span className="flex h-14 w-16 shrink-0 flex-col items-center justify-center rounded-xl bg-granate-600 text-white">
@@ -352,10 +333,13 @@ export default function FinalSalones() {
 
                   <div className="min-w-[10rem] flex-1">
                     <p className="text-base font-black text-slate-900">
-                      CAT. {s.categoria} · {s.grado}
+                      {s.categorias.length === 0
+                        ? 'Vacío'
+                        : s.categorias.map((c) => `CAT. ${c}`).join(' · ')}
                     </p>
                     <p className="text-base text-slate-600">
                       {s.total} {s.total === 1 ? 'alumno' : 'alumnos'}
+                      {s.excedido && ' · sobre el cupo'}
                     </p>
                   </div>
 
@@ -364,7 +348,7 @@ export default function FinalSalones() {
                       compacto
                       etiqueta="Responsable"
                       value={s.responsableId || ''}
-                      onChange={(e) => asignar(s.numero, e.target.value || null)}
+                      onChange={(e) => asignar(s, e.target.value || null)}
                     >
                       <option value="">Sin asignar</option>
                       {responsables.map((r) => (
@@ -374,16 +358,6 @@ export default function FinalSalones() {
                       ))}
                     </Selector>
                   </div>
-
-                  <Boton
-                    variante="excelContorno"
-                    tamano="chico"
-                    cargando={procesando === `excel-${s.numero}`}
-                    onClick={() => bajar(s.numero)}
-                  >
-                    <Download className="h-5 w-5" />
-                    Lista
-                  </Boton>
                 </div>
               ))}
             </div>
@@ -405,7 +379,7 @@ export default function FinalSalones() {
         <Tarjeta>
           <Aviso tipo="alerta" icono={AlertCircle} compacto>
             No hay cuentas de supervisor para poner a cargo de las aulas. Créelas en Ajustes ·
-            Supervisores —nombre, DNI y correo— y deles el permiso «Responsable de salón».
+            Supervisores —nombre, DNI y correo— y deles el permiso «Mi salón · final».
           </Aviso>
         </Tarjeta>
       )}

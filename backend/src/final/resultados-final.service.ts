@@ -46,7 +46,10 @@ export interface PuestoFinal {
   incorrectas: number;
   blancos: number;
   puntaje: number;
-  /** Comparte el puntaje con otro, así que comparten el puesto. */
+  /** La hora a la que entregó y los minutos que tardó desde que empezó. */
+  horaEntrega: string;
+  minutos: number | null;
+  /** Mismo puntaje y mismo tiempo que otro: comparten el puesto. */
   empatado: boolean;
 }
 
@@ -134,22 +137,37 @@ export class ResultadosFinalService {
   /**
    * Todos los que rindieron, con su puesto dentro de su categoría.
    *
+   * A igual puntaje pasa primero quien entregó antes: por eso el acta pide la
+   * hora de entrega. Solo quedan empatados los que además tardaron lo mismo,
+   * que son pocos y esos sí comparten el puesto.
+   *
+   * Quien no tiene hora anotada va al final de su grupo de puntaje: no se le
+   * premia por un dato que faltó, pero tampoco se le baja de puntaje.
+   *
    * El salón no entra en el orden: se reparte por salones para que quepan en
    * la sede, no para que compitan por aula.
    */
   async calcular(): Promise<PuestoFinal[]> {
     const todas = await this.examen.todas();
     const lista: PuestoFinal[] = [];
+    const tiempo = (m: number | null) => (m === null ? Infinity : m);
 
     for (const grado of GRADOS) {
       const suyos = todas
         .filter((f) => f.categoria === grado.categoria)
-        .sort((a, b) => b.puntaje - a.puntaje || a.nombres.localeCompare(b.nombres, 'es'));
+        .sort(
+          (a, b) =>
+            b.puntaje - a.puntaje ||
+            tiempo(a.minutos) - tiempo(b.minutos) ||
+            a.nombres.localeCompare(b.nombres, 'es'),
+        );
 
-      suyos.forEach((f, i) => {
-        // Mismo puntaje, mismo puesto: se busca el primero que lo tiene.
-        const puesto = suyos.findIndex((x) => x.puntaje === f.puntaje) + 1;
-        const empatado = suyos.filter((x) => x.puntaje === f.puntaje).length > 1;
+      const igual = (x: typeof suyos[number], y: typeof suyos[number]) =>
+        x.puntaje === y.puntaje && tiempo(x.minutos) === tiempo(y.minutos);
+
+      suyos.forEach((f) => {
+        const puesto = suyos.findIndex((x) => igual(x, f)) + 1;
+        const empatado = suyos.filter((x) => igual(x, f)).length > 1;
 
         lista.push({
           puesto,
@@ -164,6 +182,8 @@ export class ResultadosFinalService {
           incorrectas: f.incorrectas,
           blancos: f.blancos,
           puntaje: f.puntaje,
+          horaEntrega: f.horaEntrega,
+          minutos: f.minutos,
           empatado,
         });
       });
@@ -296,6 +316,8 @@ export class ResultadosFinalService {
       grado: r.grado,
       puesto: r.puesto,
       empatado: r.empatado,
+      horaEntrega: r.horaEntrega,
+      minutos: r.minutos,
       correctas: r.correctas,
       incorrectas: r.incorrectas,
       blancos: r.blancos,
@@ -389,6 +411,8 @@ export class ResultadosFinalService {
       { header: 'APELLIDOS Y NOMBRES', width: 38 },
       { header: 'INSTITUCIÓN EDUCATIVA', width: 38 },
       { header: 'SALÓN', width: 9 },
+      { header: 'ENTREGÓ', width: 11 },
+      { header: 'MIN.', width: 8 },
       { header: 'ACIERTOS', width: 11 },
       { header: 'ERRORES', width: 11 },
       { header: 'BLANCOS', width: 11 },
@@ -403,13 +427,15 @@ export class ResultadosFinalService {
           r.nombres,
           r.institucion,
           r.salon,
+          r.horaEntrega || '—',
+          r.minutos ?? '—',
           r.correctas,
           r.incorrectas,
           r.blancos,
           r.puntaje,
         ]);
         fila.getCell(2).numFmt = '@';
-        fila.getCell(9).font = { bold: true, color: { argb: GRANATE } };
+        fila.getCell(columnas.length).font = { bold: true, color: { argb: GRANATE } };
         if (r.puesto <= 3) {
           fila.getCell(1).font = { bold: true, color: { argb: 'FFB45309' } };
         }
@@ -450,6 +476,8 @@ export class ResultadosFinalService {
         r.nombres,
         r.institucion,
         r.salon,
+        r.horaEntrega || '—',
+        r.minutos ?? '—',
         r.correctas,
         r.incorrectas,
         r.blancos,

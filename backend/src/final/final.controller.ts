@@ -47,6 +47,12 @@ const Responsable = () =>
     Permiso('final-salon'),
   );
 
+/**
+ * Un salón se nombra con su turno y su número.
+ *
+ * El número solo no alcanza desde que los dos turnos usan las mismas aulas: el
+ * 101 de secundaria y el 101 de primaria son puertas distintas en la agenda.
+ */
 @Controller('final')
 export class FinalController {
   constructor(
@@ -138,11 +144,12 @@ export class FinalController {
     return this.final.borrarSorteo();
   }
 
-  /** Acomodar a mano lo que el reparto automático dejó. */
+  // --------------------------------------------------- acomodar a mano
+
   @SoloAdmin()
   @Post('salones/mover')
-  mover(@Body() body: { dni?: string; salon?: number }) {
-    return this.final.moverAlumno(body?.dni || '', Number(body?.salon));
+  mover(@Body() body: { dni?: string; nivel?: string; salon?: number }) {
+    return this.final.moverAlumno(body?.dni || '', body?.nivel || '', Number(body?.salon));
   }
 
   @SoloAdmin()
@@ -153,36 +160,46 @@ export class FinalController {
 
   @SoloAdmin()
   @Post('salones/nuevo')
-  crearSalon(@Body() body: { categoria?: string }) {
-    return this.final.crearSalon(body?.categoria || '');
+  crearSalon(@Body() body: { nivel?: string }) {
+    return this.final.crearSalon(body?.nivel || '');
   }
 
   @SoloAdmin()
-  @Delete('salones/:numero')
-  borrarSalon(@Param('numero') numero: string) {
-    return this.final.borrarSalon(Number(numero));
+  @Delete('salones/:nivel/:numero')
+  borrarSalon(@Param('nivel') nivel: string, @Param('numero') numero: string) {
+    return this.final.borrarSalon(nivel, Number(numero));
   }
 
   @SoloAdmin()
-  @Post('salones/:numero/responsable')
-  asignar(@Param('numero') numero: string, @Body() body: { responsableId?: string | null }) {
-    return this.final.asignar(Number(numero), body?.responsableId || null);
+  @Post('salones/:nivel/:numero/responsable')
+  asignar(
+    @Param('nivel') nivel: string,
+    @Param('numero') numero: string,
+    @Body() body: { responsableId?: string | null },
+  ) {
+    return this.final.asignar(nivel, Number(numero), body?.responsableId || null);
   }
+
+  // ------------------------------------------------- las listas del examen
 
   /** La lista de la puerta. El responsable baja la suya; el admin, todas. */
   @Responsable()
-  @Get('salones/excel')
+  @Get('listas/excel')
   async excelSalones(
+    @Query('nivel') nivel: string,
     @Query('salon') salon: string,
     @CurrentUser() usuario: JwtUser,
     @Res() res: Response,
   ) {
-    if (salon) await this.soloSuSalon(usuario, salon);
+    if (salon) await this.soloSuSalon(usuario, nivel, salon);
     else if (usuario.rol !== 'ADMIN') {
       throw new ForbiddenException('Solo puede bajar la lista de los salones a su cargo.');
     }
 
-    const { buffer, nombre } = await this.final.excel(salon ? Number(salon) : undefined);
+    const { buffer, nombre } = await this.final.excel({
+      nivel: nivel || undefined,
+      numero: salon ? Number(salon) : undefined,
+    });
     this.enviar(res, buffer, nombre);
   }
 
@@ -200,17 +217,19 @@ export class FinalController {
   @Get('examen/config')
   async configExamen(@CurrentUser() usuario: JwtUser) {
     const config = await this.examen.config();
-    // El responsable de aula necesita saber cuántas preguntas trae la prueba,
-    // no las respuestas correctas.
-    if (usuario.rol === 'ADMIN') return config;
+    const estructura = this.examen.estructura();
+
+    // El responsable de aula necesita saber cómo está armada la prueba, no las
+    // respuestas correctas.
+    if (usuario.rol === 'ADMIN') return { ...config, estructura };
     const { claves, ...resto } = config;
-    return { ...resto, categoriasConClave: Object.keys(claves).sort() };
+    return { ...resto, estructura, categoriasConClave: Object.keys(claves).sort() };
   }
 
   @SoloAdmin()
   @Post('examen/clave')
-  guardarClave(@Body() body: { categoria?: string; respuestas?: unknown }) {
-    return this.examen.guardarClave(body?.categoria || '', body?.respuestas);
+  guardarClave(@Body() body: { categoria?: string; clave?: unknown }) {
+    return this.examen.guardarClave(body?.categoria || '', body?.clave);
   }
 
   @SoloAdmin()
@@ -226,76 +245,9 @@ export class FinalController {
   }
 
   @SoloAdmin()
-  @Post('examen/preguntas')
-  guardarPreguntas(@Body() body: { preguntas?: number }) {
-    return this.examen.guardarPreguntas(body?.preguntas);
-  }
-
-  @SoloAdmin()
   @Post('examen/abrir')
   abrir(@Body() body: { abierto?: boolean }) {
     return this.examen.abrir(Boolean(body?.abierto));
-  }
-
-  @Responsable()
-  @Get('examen/:numero/plantilla')
-  async plantilla(
-    @Param('numero') numero: string,
-    @CurrentUser() usuario: JwtUser,
-    @Res() res: Response,
-  ) {
-    await this.soloSuSalon(usuario, numero);
-    const { buffer, nombre } = await this.examen.plantilla(Number(numero));
-    this.enviar(res, buffer, nombre);
-  }
-
-  @Responsable()
-  @Post('examen/:numero/revisar')
-  @UseInterceptors(FileInterceptor('archivo', { limits: { fileSize: 5 * 1024 * 1024 } }))
-  async revisar(
-    @Param('numero') numero: string,
-    @UploadedFile() archivo: Express.Multer.File,
-    @CurrentUser() usuario: JwtUser,
-  ) {
-    await this.soloSuSalon(usuario, numero);
-    return this.examen.revisar(Number(numero), archivo);
-  }
-
-  @Responsable()
-  @Post('examen/:numero/enviar')
-  @UseInterceptors(FileInterceptor('archivo', { limits: { fileSize: 5 * 1024 * 1024 } }))
-  async recibir(
-    @Param('numero') numero: string,
-    @UploadedFile() archivo: Express.Multer.File,
-    @CurrentUser() usuario: JwtUser,
-  ) {
-    await this.soloSuSalon(usuario, numero);
-    return this.examen.registrar(Number(numero), archivo, {
-      nombre: usuario.nombre || '',
-      esAdmin: usuario.rol === 'ADMIN',
-    });
-  }
-
-  @SoloAdmin()
-  @Delete('examen/:numero')
-  anular(@Param('numero') numero: string) {
-    return this.examen.anular(Number(numero));
-  }
-
-  @SoloAdmin()
-  @Post('examen/:numero/corregir')
-  corregir(
-    @Param('numero') numero: string,
-    @Body() body: { dni?: string; respuestas?: unknown },
-  ) {
-    return this.examen.corregirAlumno(Number(numero), body?.dni || '', body?.respuestas);
-  }
-
-  @Responsable()
-  @Get('examen/:numero')
-  async entrega(@Param('numero') numero: string, @CurrentUser() usuario: JwtUser) {
-    await this.soloSuSalon(usuario, numero);
-    return this.examen.entregaDe(Number(numero));
   }
 
   @SoloAdmin()
@@ -318,14 +270,84 @@ export class FinalController {
   }
 
   @Responsable()
-  @Get('examen/:numero/excel')
-  async excelEnviadas(
+  @Get('examen/:nivel/:numero/plantilla')
+  async plantilla(
+    @Param('nivel') nivel: string,
     @Param('numero') numero: string,
     @CurrentUser() usuario: JwtUser,
     @Res() res: Response,
   ) {
-    await this.soloSuSalon(usuario, numero);
-    const { buffer, nombre } = await this.examen.excelEnviadas(Number(numero));
+    await this.soloSuSalon(usuario, nivel, numero);
+    const { buffer, nombre } = await this.examen.plantilla(nivel, Number(numero));
+    this.enviar(res, buffer, nombre);
+  }
+
+  @Responsable()
+  @Post('examen/:nivel/:numero/revisar')
+  @UseInterceptors(FileInterceptor('archivo', { limits: { fileSize: 5 * 1024 * 1024 } }))
+  async revisar(
+    @Param('nivel') nivel: string,
+    @Param('numero') numero: string,
+    @UploadedFile() archivo: Express.Multer.File,
+    @CurrentUser() usuario: JwtUser,
+  ) {
+    await this.soloSuSalon(usuario, nivel, numero);
+    return this.examen.revisar(nivel, Number(numero), archivo);
+  }
+
+  @Responsable()
+  @Post('examen/:nivel/:numero/enviar')
+  @UseInterceptors(FileInterceptor('archivo', { limits: { fileSize: 5 * 1024 * 1024 } }))
+  async recibir(
+    @Param('nivel') nivel: string,
+    @Param('numero') numero: string,
+    @UploadedFile() archivo: Express.Multer.File,
+    @CurrentUser() usuario: JwtUser,
+  ) {
+    await this.soloSuSalon(usuario, nivel, numero);
+    return this.examen.registrar(nivel, Number(numero), archivo, {
+      nombre: usuario.nombre || '',
+      esAdmin: usuario.rol === 'ADMIN',
+    });
+  }
+
+  @SoloAdmin()
+  @Delete('examen/:nivel/:numero')
+  anular(@Param('nivel') nivel: string, @Param('numero') numero: string) {
+    return this.examen.anular(nivel, Number(numero));
+  }
+
+  @SoloAdmin()
+  @Post('examen/:nivel/:numero/corregir')
+  corregir(
+    @Param('nivel') nivel: string,
+    @Param('numero') numero: string,
+    @Body() body: { dni?: string; alternativas?: unknown; numericas?: unknown; horaEntrega?: string },
+  ) {
+    return this.examen.corregirAlumno(nivel, Number(numero), body?.dni || '', body);
+  }
+
+  @Responsable()
+  @Get('examen/:nivel/:numero')
+  async entrega(
+    @Param('nivel') nivel: string,
+    @Param('numero') numero: string,
+    @CurrentUser() usuario: JwtUser,
+  ) {
+    await this.soloSuSalon(usuario, nivel, numero);
+    return this.examen.entregaDe(nivel, Number(numero));
+  }
+
+  @Responsable()
+  @Get('examen/:nivel/:numero/excel')
+  async excelEnviadas(
+    @Param('nivel') nivel: string,
+    @Param('numero') numero: string,
+    @CurrentUser() usuario: JwtUser,
+    @Res() res: Response,
+  ) {
+    await this.soloSuSalon(usuario, nivel, numero);
+    const { buffer, nombre } = await this.examen.excelEnviadas(nivel, Number(numero));
     this.enviar(res, buffer, nombre);
   }
 
@@ -333,7 +355,7 @@ export class FinalController {
 
   @SoloAdmin()
   @Get('credencial')
-  credencial_() {
+  estadoDeCredenciales() {
     return this.credencial.estado();
   }
 
@@ -349,17 +371,17 @@ export class FinalController {
     this.enviarPdf(res, await this.credencial.muestra(), 'muestra-credencial-final.pdf');
   }
 
-  /** Todas, o las de un salón o una categoría: lo que imprime la comisión. */
+  /** Todas, o las de un salón o un turno: lo que imprime la comisión. */
   @SoloAdmin()
   @Get('credencial/pdf')
   async credencialesComision(
+    @Query('nivel') nivel: string,
     @Query('salon') salon: string,
-    @Query('categoria') categoria: string,
     @Res() res: Response,
   ) {
     const pdf = await this.credencial.pdfComision({
+      nivel: nivel || undefined,
       salon: salon ? Number(salon) : undefined,
-      categoria: categoria || undefined,
     });
     this.enviarPdf(
       res,
@@ -430,8 +452,8 @@ export class FinalController {
    * esta comprobación, cualquiera con `final-salon` podría escribir sobre el
    * envío del aula de al lado.
    */
-  private async soloSuSalon(usuario: JwtUser, numero: string) {
-    if (await this.final.puedeVerSalon(usuario, Number(numero))) return;
+  private async soloSuSalon(usuario: JwtUser, nivel: string, numero: string) {
+    if (await this.final.puedeVerSalon(usuario, nivel, Number(numero))) return;
     throw new ForbiddenException('Ese salón no está a su cargo.');
   }
 

@@ -121,8 +121,9 @@ export class CredencialFinalService {
           nombres: a.nombres,
           institucion: a.institucion,
           tutorId: a.tutorId,
-          categoria: salon.categoria,
-          grado: salon.grado,
+          // Del alumno y no del salón: un aula puede llevar varias categorías.
+          categoria: a.categoria,
+          grado: a.grado,
           nivel: salon.nivel,
           salon: salon.numero,
           puesto: i + 1,
@@ -181,13 +182,11 @@ export class CredencialFinalService {
   }
 
   /** Todas, o las de un salón: lo que imprime la comisión. */
-  async pdfComision(filtros: { salon?: number; categoria?: string } = {}): Promise<Buffer> {
+  async pdfComision(filtros: { salon?: number; nivel?: string } = {}): Promise<Buffer> {
     let lista = await this.finalistas();
 
+    if (filtros.nivel) lista = lista.filter((f) => f.nivel === filtros.nivel);
     if (filtros.salon) lista = lista.filter((f) => f.salon === Number(filtros.salon));
-    if (filtros.categoria) {
-      lista = lista.filter((f) => f.categoria === String(filtros.categoria).toUpperCase());
-    }
 
     if (lista.length === 0) {
       throw new NotFoundException('No hay finalistas con esos filtros');

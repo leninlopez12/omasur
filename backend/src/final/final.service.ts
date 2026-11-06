@@ -13,11 +13,19 @@ export type NivelFinal = 'SECUNDARIA' | 'PRIMARIA';
 /**
  * El orden del día.
  *
- * Secundaria rinde temprano y primaria después, y los salones se numeran
- * siguiendo ese mismo orden: así el número del salón dice a qué hora se entra,
- * sin que nadie tenga que cruzar dos listas.
+ * Secundaria rinde temprano y primaria después, en las mismas aulas: por eso
+ * los dos turnos numeran desde el mismo primer salón. El 101 de la mañana y el
+ * 101 de media mañana son la misma puerta con gente distinta.
  */
 export const ORDEN_NIVELES: NivelFinal[] = ['SECUNDARIA', 'PRIMARIA'];
+
+export const NIVEL_TEXTO: Record<NivelFinal, string> = {
+  SECUNDARIA: 'Secundaria',
+  PRIMARIA: 'Primaria',
+};
+
+/** Como el número se repite entre turnos, un salón se nombra con los dos. */
+export const idSalon = (nivel: NivelFinal, numero: number) => `${nivel}-${numero}`;
 
 interface Bloque {
   inicio: string;
@@ -27,7 +35,7 @@ interface Bloque {
 export interface ConfigFinal {
   /** Cuántos entran por salón. */
   capacidad: number;
-  /** El número del primer salón; de ahí para arriba, uno por uno. */
+  /** El número del primer salón de cada turno; de ahí para arriba. */
   primerSalon: number;
   sede: string;
   fecha: string;
@@ -52,13 +60,14 @@ export interface AlumnoSalon {
   nombres: string;
   institucion: string;
   tutorId: string;
+  /** Viaja con el alumno: un salón puede acabar con varias si lo acomodan. */
+  categoria: string;
+  grado: string;
 }
 
 export interface Salon {
   numero: number;
   nivel: NivelFinal;
-  categoria: string;
-  grado: string;
   /** La cuenta de la comisión que vigila el salón y sube sus respuestas. */
   responsableId: string | null;
   alumnos: AlumnoSalon[];
@@ -76,9 +85,10 @@ export interface Sorteo {
  *
  * A la final llega quien clasificó en la institucional. Como es presencial y
  * en una sola sede, hay que repartirlos en aulas y decir quién vigila cada
- * una. El reparto es por categoría —cada categoría rinde su propia prueba, así
- * que mezclarlas en un salón obligaría a repartir dos exámenes distintos en la
- * misma puerta— y dentro de cada una por orden alfabético, de a treinta.
+ * una. El reparto automático va categoría por categoría y dentro de cada una
+ * por orden alfabético, de a treinta, porque es lo que menos trabajo da
+ * después; pero una vez armado se acomoda a mano sin esa regla, que es como
+ * se resuelven las cosas que el reparto no puede saber.
  *
  * El reparto se guarda, no se recalcula. Las listas se imprimen y se pegan en
  * las puertas: si cambiara solo porque alguien corrigió un DNI, el alumno
@@ -137,7 +147,7 @@ export class FinalService {
     }
 
     if (datos.sede !== undefined) config.sede = String(datos.sede).trim().slice(0, 160);
-    if (datos.fecha !== undefined) config.fecha = String(datos.fecha).trim().slice(0, 40);
+    if (datos.fecha !== undefined) config.fecha = String(datos.fecha).trim().slice(0, 60);
 
     for (const nivel of ORDEN_NIVELES) {
       const bloque = datos.bloques?.[nivel];
@@ -186,10 +196,11 @@ export class FinalService {
   /**
    * Arma el reparto desde cero.
    *
-   * Vuelve a repartir a todos, así que se pide a mano y la pantalla avisa de
-   * lo que implica. Lo único que se respeta del reparto anterior es quién
-   * vigilaba cada número de salón: el rol docente no cambia porque entre un
-   * alumno más.
+   * Cada turno numera desde el primer salón porque son las mismas aulas: a las
+   * 8:30 entra secundaria al 101 y a las 10:30 entra primaria al mismo 101.
+   *
+   * Lo único que se respeta del reparto anterior es quién vigilaba cada aula:
+   * el rol docente no cambia porque entre un alumno más.
    */
   async generar() {
     const [config, clasificados, anterior] = await Promise.all([
@@ -204,8 +215,8 @@ export class FinalService {
       );
     }
 
-    // Rehacer el reparto renumera todo, y las actas se guardan por número de
-    // salón: las respuestas quedarían atribuidas a quien no se sentó ahí.
+    // Rehacer el reparto renumera todo, y las actas se guardan por salón: las
+    // respuestas quedarían atribuidas a quien no se sentó ahí.
     const conActa = await this.salonesConActa();
     if (conActa.size > 0) {
       throw new BadRequestException(
@@ -215,13 +226,14 @@ export class FinalService {
     }
 
     const responsablePrevio = new Map(
-      (anterior?.salones || []).map((s) => [s.numero, s.responsableId]),
+      (anterior?.salones || []).map((s) => [idSalon(s.nivel, s.numero), s.responsableId]),
     );
 
     const salones: Salon[] = [];
-    let numero = config.primerSalon;
 
     for (const nivel of ORDEN_NIVELES) {
+      let numero = config.primerSalon;
+
       for (const grado of GRADOS.filter((g) => g.nivel === nivel)) {
         const suyos = clasificados
           .filter((r) => r.categoria === grado.categoria)
@@ -231,14 +243,14 @@ export class FinalService {
           salones.push({
             numero,
             nivel,
-            categoria: grado.categoria,
-            grado: grado.label,
-            responsableId: responsablePrevio.get(numero) ?? null,
+            responsableId: responsablePrevio.get(idSalon(nivel, numero)) ?? null,
             alumnos: suyos.slice(i, i + config.capacidad).map((r) => ({
               dni: r.dni,
               nombres: r.nombres,
               institucion: r.institucion,
               tutorId: r.tutorId,
+              categoria: r.categoria,
+              grado: grado.label,
             })),
           });
           numero += 1;
@@ -293,16 +305,22 @@ export class FinalService {
     ]);
     const porId = new Map(responsables.map((r) => [r.id, r]));
 
-    const salones = (sorteo?.salones || []).map((s) => ({
-      ...s,
-      total: s.alumnos.length,
-      horario: config.bloques[s.nivel],
-      responsable: s.responsableId ? porId.get(s.responsableId) || null : null,
-      // Ya entregó: su gente queda quieta hasta que se anule el envío.
-      conActa: conActa.has(s.numero),
-      // Acomodar a mano puede pasarse del cupo, y conviene que se vea.
-      excedido: s.alumnos.length > config.capacidad,
-    }));
+    const salones = (sorteo?.salones || []).map((s) => {
+      const categorias = [...new Set(s.alumnos.map((a) => a.categoria))].sort();
+      return {
+        ...s,
+        id: idSalon(s.nivel, s.numero),
+        total: s.alumnos.length,
+        horario: config.bloques[s.nivel],
+        responsable: s.responsableId ? porId.get(s.responsableId) || null : null,
+        // Ya entregó: su gente queda quieta hasta que se anule el envío.
+        conActa: conActa.has(idSalon(s.nivel, s.numero)),
+        // Acomodar a mano puede pasarse del cupo, y conviene que se vea.
+        excedido: s.alumnos.length > config.capacidad,
+        categorias,
+        mezclado: categorias.length > 1,
+      };
+    });
 
     const repartidos = salones.reduce((suma, s) => suma + s.total, 0);
 
@@ -312,6 +330,7 @@ export class FinalService {
       salones,
       niveles: ORDEN_NIVELES.map((nivel) => ({
         nivel,
+        texto: NIVEL_TEXTO[nivel],
         horario: config.bloques[nivel],
         salones: salones.filter((s) => s.nivel === nivel).length,
         alumnos: salones.filter((s) => s.nivel === nivel).reduce((n, s) => n + s.total, 0),
@@ -325,11 +344,9 @@ export class FinalService {
         // impreso ya no coincide y hay que volver a armarlo.
         desfasado: Boolean(sorteo) && repartidos !== clasificados.length,
         sinResponsable: salones.filter((s) => !s.responsableId).length,
-        // Con actas entregadas el reparto ya no se rehace entero.
         conActa: salones.filter((s) => s.conActa).length,
         excedidos: salones.filter((s) => s.excedido).length,
-        // A quien no le tocó salón: pasa si lo sacaron de uno y nadie lo
-        // volvió a sentar, o si clasificó después de armar el reparto.
+        mezclados: salones.filter((s) => s.mezclado).length,
         sinSalon: this.sinSalon(sorteo, clasificados),
       },
     };
@@ -348,29 +365,29 @@ export class FinalService {
       .map((r) => ({
         dni: r.dni,
         nombres: r.nombres,
-        // La categoría viaja porque la pantalla solo puede ofrecerle los
-        // salones de la suya.
         categoria: r.categoria,
         institucion: r.institucion,
+        nivel: (GRADOS.find((g) => g.categoria === r.categoria)?.nivel ||
+          'PRIMARIA') as NivelFinal,
       }));
   }
 
   // ------------------------------------------------------- acomodar a mano
 
   /**
-   * Los salones que ya entregaron su acta.
+   * Los salones que ya entregaron su acta, por su id.
    *
    * Ahí no se mueve a nadie: el acta se guardó con la gente que tenía ese
    * salón, y cambiarla después dejaría respuestas atribuidas a quien no se
    * sentó ahí. Se lee la fila del examen directamente para no atar este
    * servicio al del examen, que a su vez depende de este.
    */
-  private async salonesConActa(): Promise<Set<number>> {
+  private async salonesConActa(): Promise<Set<string>> {
     const filas = await this.prisma.ajuste.findMany({
       where: { clave: { startsWith: 'examen_final_respuestas_' } },
       select: { clave: true },
     });
-    return new Set(filas.map((f) => Number(f.clave.replace('examen_final_respuestas_', ''))));
+    return new Set(filas.map((f) => f.clave.replace('examen_final_respuestas_', '')));
   }
 
   private async sorteoVivo(): Promise<Sorteo> {
@@ -386,65 +403,78 @@ export class FinalService {
     });
   }
 
-  private trabado(conActa: Set<number>, ...numeros: number[]) {
-    const quieto = numeros.find((n) => conActa.has(n));
-    if (quieto !== undefined) {
+  private trabado(conActa: Set<string>, ...salones: (Salon | undefined)[]) {
+    const quieto = salones.find((s) => s && conActa.has(idSalon(s.nivel, s.numero)));
+    if (quieto) {
       throw new BadRequestException(
-        `El salón ${quieto} ya entregó su acta. Anule ese envío antes de tocar su gente.`,
+        `El salón ${quieto.numero} de ${NIVEL_TEXTO[quieto.nivel].toLowerCase()} ya entregó su acta. ` +
+          'Anule ese envío antes de tocar su gente.',
       );
     }
+  }
+
+  private buscarSalon(sorteo: Sorteo, nivel: string, numero: number) {
+    const salon = sorteo.salones.find(
+      (s) => s.nivel === nivel && s.numero === Number(numero),
+    );
+    if (!salon) throw new NotFoundException('Ese salón no existe en el reparto');
+    return salon;
   }
 
   /**
    * Cambia a un alumno de salón.
    *
-   * Solo entre salones de su misma categoría: el salón decide qué prueba se
-   * reparte en esa puerta, así que mandarlo a uno de otra categoría le daría
-   * un examen que no es el suyo.
+   * Dentro del turno se mueve a donde sea, aunque el salón lleve otra
+   * categoría: cada examen se corrige con la clave del alumno y no con la del
+   * aula, así que mezclar no rompe nada y a veces es la única forma de que
+   * entren todos.
    *
-   * La capacidad no frena el movimiento. El reparto automático la respeta;
-   * esto es la excepción que se hace a mano, y quien la hace sabe por qué.
+   * De turno no se le cambia: el nivel decide a qué hora rinde, y mandarlo al
+   * otro le pondría en la credencial una hora a la que no lo esperan.
+   *
+   * La capacidad tampoco frena el movimiento. El reparto automático la
+   * respeta; esto es la excepción que se hace a mano.
    */
-  async moverAlumno(dni: string, destino: number) {
+  async moverAlumno(dni: string, nivel: string, numero: number) {
     const sorteo = await this.sorteoVivo();
     const conActa = await this.salonesConActa();
     const limpio = String(dni || '').trim();
 
-    const salon = sorteo.salones.find((s) => s.numero === Number(destino));
-    if (!salon) throw new NotFoundException('Ese salón no existe en el reparto');
-
+    const salon = this.buscarSalon(sorteo, nivel, numero);
     const origen = sorteo.salones.find((s) => s.alumnos.some((a) => a.dni === limpio));
 
     // Sin salón de origen puede ser que clasificara después de armar el
     // reparto: se le busca entre los clasificados y se le sienta, que es más
     // sano que rehacer el reparto entero por una persona.
     let alumno: AlumnoSalon | undefined = origen?.alumnos.find((a) => a.dni === limpio);
-    let categoria = origen?.categoria;
 
     if (!alumno) {
       const suelto = (await this.clasificados()).find((r) => r.dni === limpio);
-      if (!suelto) {
-        throw new NotFoundException('Ese alumno no clasificó a la final');
-      }
+      if (!suelto) throw new NotFoundException('Ese alumno no clasificó a la final');
       alumno = {
         dni: suelto.dni,
         nombres: suelto.nombres,
         institucion: suelto.institucion,
         tutorId: suelto.tutorId,
+        categoria: suelto.categoria,
+        grado: GRADOS.find((g) => g.categoria === suelto.categoria)?.label || '',
       };
-      categoria = suelto.categoria;
     }
 
-    if (origen?.numero === salon.numero) return this.estado();
+    if (origen && origen.nivel === salon.nivel && origen.numero === salon.numero) {
+      return this.estado();
+    }
 
-    if (salon.categoria !== categoria) {
+    const nivelAlumno = GRADOS.find((g) => g.categoria === alumno.categoria)?.nivel;
+    if (nivelAlumno !== salon.nivel) {
       throw new BadRequestException(
-        `El salón ${salon.numero} es de la CAT. ${salon.categoria} y el alumno es de la CAT. ${categoria}. ` +
-          'Cada salón rinde una sola prueba.',
+        `El salón ${salon.numero} es del turno de ${NIVEL_TEXTO[salon.nivel].toLowerCase()} y ` +
+          `${alumno.nombres} rinde con ${NIVEL_TEXTO[nivelAlumno as NivelFinal].toLowerCase()}. ` +
+          'Los dos turnos entran a distinta hora.',
       );
     }
 
-    this.trabado(conActa, ...[origen?.numero, salon.numero].filter((n): n is number => !!n));
+    this.trabado(conActa, origen, salon);
 
     if (origen) origen.alumnos = origen.alumnos.filter((a) => a.dni !== limpio);
     salon.alumnos.push(alumno);
@@ -452,7 +482,7 @@ export class FinalService {
 
     await this.guardarSorteo(sorteo);
     this.log.log(
-      `${alumno.nombres} ${origen ? `pasó del salón ${origen.numero} al` : 'se sentó en el salón'} ${salon.numero}.`,
+      `${alumno.nombres} ${origen ? `pasó del salón ${origen.numero} al` : 'se sentó en el salón'} ${salon.numero} (${salon.nivel}).`,
     );
     return this.estado();
   }
@@ -466,7 +496,7 @@ export class FinalService {
     const origen = sorteo.salones.find((s) => s.alumnos.some((a) => a.dni === limpio));
     if (!origen) throw new NotFoundException('Ese alumno no está sentado en ningún salón');
 
-    this.trabado(conActa, origen.numero);
+    this.trabado(conActa, origen);
 
     const alumno = origen.alumnos.find((a) => a.dni === limpio);
     origen.alumnos = origen.alumnos.filter((a) => a.dni !== limpio);
@@ -477,45 +507,44 @@ export class FinalService {
   }
 
   /**
-   * Abre un salón vacío para una categoría.
+   * Abre un salón vacío en un turno.
    *
-   * Toma el primer número libre, que no tiene por qué caer junto a los de su
-   * nivel: después de mover cosas a mano el número deja de decir la hora, y
-   * por eso cada salón lleva su horario escrito en la lista que se imprime.
+   * Toma el primer número libre de ese turno, así que reaprovecha el hueco de
+   * uno cerrado. El salón nace sin categoría: la toma de quien se siente.
    */
-  async crearSalon(categoria: string) {
+  async crearSalon(nivel: string) {
     const sorteo = await this.sorteoVivo();
-    const cat = String(categoria || '').trim().toUpperCase();
+    if (!ORDEN_NIVELES.includes(nivel as NivelFinal)) {
+      throw new BadRequestException('Ese turno no existe');
+    }
 
-    const grado = GRADOS.find((g) => g.categoria === cat);
-    if (!grado) throw new BadRequestException('Esa categoría no existe');
-
-    const ocupados = new Set(sorteo.salones.map((s) => s.numero));
+    const ocupados = new Set(
+      sorteo.salones.filter((s) => s.nivel === nivel).map((s) => s.numero),
+    );
     let numero = sorteo.primerSalon;
     while (ocupados.has(numero)) numero += 1;
 
     sorteo.salones.push({
       numero,
-      nivel: grado.nivel === 'SECUNDARIA' ? 'SECUNDARIA' : 'PRIMARIA',
-      categoria: cat,
-      grado: grado.label,
+      nivel: nivel as NivelFinal,
       responsableId: null,
       alumnos: [],
     });
-    sorteo.salones.sort((a, b) => a.numero - b.numero);
+    sorteo.salones.sort(
+      (a, b) =>
+        ORDEN_NIVELES.indexOf(a.nivel) - ORDEN_NIVELES.indexOf(b.nivel) || a.numero - b.numero,
+    );
 
     await this.guardarSorteo(sorteo);
-    this.log.log(`Se abrió el salón ${numero} para la CAT. ${cat}.`);
+    this.log.log(`Se abrió el salón ${numero} de ${nivel}.`);
     return this.estado();
   }
 
   /** Cierra un salón. Tiene que estar vacío: nadie se borra de paso. */
-  async borrarSalon(numero: number) {
+  async borrarSalon(nivel: string, numero: number) {
     const sorteo = await this.sorteoVivo();
     const conActa = await this.salonesConActa();
-
-    const salon = sorteo.salones.find((s) => s.numero === Number(numero));
-    if (!salon) throw new NotFoundException('Ese salón no existe en el reparto');
+    const salon = this.buscarSalon(sorteo, nivel, numero);
 
     if (salon.alumnos.length > 0) {
       throw new BadRequestException(
@@ -523,12 +552,14 @@ export class FinalService {
           'Muévalos a otro salón antes de cerrarlo.',
       );
     }
-    this.trabado(conActa, salon.numero);
+    this.trabado(conActa, salon);
 
-    sorteo.salones = sorteo.salones.filter((s) => s.numero !== salon.numero);
+    sorteo.salones = sorteo.salones.filter(
+      (s) => !(s.nivel === salon.nivel && s.numero === salon.numero),
+    );
     await this.guardarSorteo(sorteo);
 
-    this.log.warn(`Se cerró el salón ${salon.numero}.`);
+    this.log.warn(`Se cerró el salón ${salon.numero} de ${salon.nivel}.`);
     return this.estado();
   }
 
@@ -536,20 +567,16 @@ export class FinalService {
 
   /** Las cuentas de la comisión que pueden quedar a cargo de un salón. */
   async responsables() {
-    const cuentas = await this.prisma.admin.findMany({
+    return this.prisma.admin.findMany({
       where: { rol: 'SUPERVISOR' },
       orderBy: { nombre: 'asc' },
       select: { id: true, nombre: true, correo: true, dni: true },
     });
-    return cuentas;
   }
 
-  async asignar(numero: number, responsableId: string | null) {
-    const sorteo = await this.sorteo();
-    if (!sorteo) throw new NotFoundException('Todavía no se armó el reparto de salones');
-
-    const salon = sorteo.salones.find((s) => s.numero === Number(numero));
-    if (!salon) throw new NotFoundException('Ese salón no existe en el reparto');
+  async asignar(nivel: string, numero: number, responsableId: string | null) {
+    const sorteo = await this.sorteoVivo();
+    const salon = this.buscarSalon(sorteo, nivel, numero);
 
     if (responsableId) {
       const cuenta = await this.prisma.admin.findUnique({ where: { id: responsableId } });
@@ -559,63 +586,57 @@ export class FinalService {
     }
 
     salon.responsableId = responsableId || null;
-    await this.prisma.ajuste.update({
-      where: { clave: CLAVE_SALONES },
-      data: { valor: JSON.stringify(sorteo) },
-    });
+    await this.guardarSorteo(sorteo);
 
     return this.estado();
   }
 
   /** Los salones de un supervisor: lo único que ve en su panel. */
   async misSalones(usuarioId: string) {
-    const [config, sorteo] = await Promise.all([this.config(), this.sorteo()]);
-    const suyos = (sorteo?.salones || []).filter((s) => s.responsableId === usuarioId);
-
+    const { salones, config } = await this.estado();
     return {
       config,
-      salones: suyos.map((s) => ({
-        numero: s.numero,
-        nivel: s.nivel,
-        categoria: s.categoria,
-        grado: s.grado,
-        horario: config.bloques[s.nivel],
-        total: s.alumnos.length,
-        alumnos: s.alumnos,
-      })),
+      salones: salones.filter((s) => s.responsableId === usuarioId),
     };
   }
 
   /** ¿Este salón es suyo? El administrador entra a todos. */
-  async puedeVerSalon(usuario: { sub: string; rol: string }, numero: number) {
+  async puedeVerSalon(usuario: { sub: string; rol: string }, nivel: string, numero: number) {
     if (usuario.rol === 'ADMIN') return true;
     const sorteo = await this.sorteo();
-    const salon = sorteo?.salones.find((s) => s.numero === Number(numero));
+    const salon = sorteo?.salones.find(
+      (s) => s.nivel === nivel && s.numero === Number(numero),
+    );
     return Boolean(salon && salon.responsableId === usuario.sub);
   }
 
-  async salon(numero: number): Promise<Salon> {
-    const sorteo = await this.sorteo();
-    const salon = sorteo?.salones.find((s) => s.numero === Number(numero));
-    if (!salon) throw new NotFoundException('Ese salón no existe en el reparto');
-    return salon;
+  async salon(nivel: string, numero: number): Promise<Salon> {
+    return this.buscarSalon(await this.sorteoVivo(), nivel, numero);
   }
 
   // --------------------------------------------------------------------- Excel
 
   /**
-   * Las listas que se pegan en la puerta y se firman en la mesa.
+   * Las listas que se pegan en la puerta y se pasan en la mesa.
    *
-   * Sin número de salón salen todas, una hoja por aula, que es como se imprime
-   * de una sola vez la mañana del examen.
+   * Sin salón salen todas, una hoja por aula, que es como se imprime de una
+   * sola vez la mañana del examen. La columna de categoría solo aparece cuando
+   * el salón trae más de una: en los demás sería la misma palabra repetida.
    */
-  async excel(numero?: number): Promise<{ buffer: Buffer; nombre: string }> {
+  async excel(
+    filtros: { nivel?: string; numero?: number } = {},
+  ): Promise<{ buffer: Buffer; nombre: string }> {
     const { config, salones } = await this.estado();
-    const elegidos = numero ? salones.filter((s) => s.numero === Number(numero)) : salones;
+
+    let elegidos = salones;
+    if (filtros.nivel) elegidos = elegidos.filter((s) => s.nivel === filtros.nivel);
+    if (filtros.numero) elegidos = elegidos.filter((s) => s.numero === Number(filtros.numero));
 
     if (elegidos.length === 0) {
       throw new NotFoundException(
-        numero ? 'Ese salón no existe en el reparto' : 'Todavía no se armó el reparto de salones',
+        salones.length === 0
+          ? 'Todavía no se armó el reparto de salones'
+          : 'No hay salones con esos filtros',
       );
     }
 
@@ -623,19 +644,22 @@ export class FinalService {
     libro.creator = 'I OMASUR UNI 2026';
 
     for (const salon of elegidos) {
-      const hoja = libro.addWorksheet(`SALÓN ${salon.numero}`);
+      const sufijo = salon.nivel === 'SECUNDARIA' ? 'SEC' : 'PRI';
+      const hoja = libro.addWorksheet(`${sufijo} ${salon.numero}`);
+
       const columnas = [
         { header: 'N°', width: 6 },
         { header: 'DNI', width: 14 },
-        { header: 'APELLIDOS Y NOMBRES', width: 40 },
-        { header: 'INSTITUCIÓN EDUCATIVA', width: 40 },
-        { header: 'FIRMA', width: 24 },
+        { header: 'APELLIDOS Y NOMBRES', width: 42 },
+        { header: 'INSTITUCIÓN EDUCATIVA', width: 42 },
+        ...(salon.mezclado ? [{ header: 'CAT.', width: 8 }] : []),
       ];
 
       escribirTitulo(
         hoja,
         columnas.length,
-        `SALÓN ${salon.numero} · CAT. ${salon.categoria} · ${salon.grado}`,
+        `SALÓN ${salon.numero} · ${NIVEL_TEXTO[salon.nivel].toUpperCase()}` +
+          (salon.mezclado ? '' : ` · CAT. ${salon.categorias[0] || '—'}`),
         [
           `Final macrorregional${config.fecha ? ` · ${config.fecha}` : ''}`,
           `${salon.horario.inicio} a ${salon.horario.fin}`,
@@ -649,16 +673,28 @@ export class FinalService {
       escribirEncabezados(hoja, columnas);
 
       salon.alumnos.forEach((a, i) => {
-        const fila = hoja.addRow([i + 1, a.dni, a.nombres, a.institucion, '']);
+        const fila = hoja.addRow([
+          i + 1,
+          a.dni,
+          a.nombres,
+          a.institucion,
+          ...(salon.mezclado ? [a.categoria] : []),
+        ]);
         fila.getCell(2).numFmt = '@';
         fila.getCell(3).font = { bold: true, color: { argb: GRANATE } };
-        fila.height = 26;
+        fila.height = 24;
       });
     }
 
+    const nombre = filtros.numero
+      ? `salon-${filtros.numero}-${filtros.nivel || ''}`
+      : filtros.nivel
+        ? `salones-${filtros.nivel}`
+        : 'salones-final-macrorregional';
+
     return {
       buffer: (await libro.xlsx.writeBuffer()) as unknown as Buffer,
-      nombre: nombreArchivo(numero ? `salon-${numero}-final` : 'salones-final-macrorregional'),
+      nombre: nombreArchivo(nombre),
     };
   }
 }
