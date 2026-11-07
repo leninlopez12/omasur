@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import PDFDocument = require('pdfkit');
 import { PrismaService } from '../prisma/prisma.service';
-import { FinalService, NivelFinal } from './final.service';
+import { FinalService, NIVEL_TEXTO, NivelFinal, ORDEN_NIVELES } from './final.service';
 import { EtapasService } from '../credentials/etapas.service';
 import { StorageService } from '../storage/storage.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -27,10 +27,22 @@ const CM = 28.3465;
 export const ANCHO = 9 * CM;
 export const ALTO = 6 * CM;
 
-const NIVEL_TEXTO: Record<NivelFinal, string> = {
-  SECUNDARIA: 'Secundaria',
-  PRIMARIA: 'Primaria',
-};
+/**
+ * Lo que se imprime en una tarjeta, ya resuelto.
+ *
+ * El alumno y el tutor usan el mismo molde: cambia la caja de la izquierda y
+ * cambian las filas, no el diseño. Así las dos credenciales se ven como parte
+ * del mismo juego.
+ */
+export interface Tarjeta {
+  nombre: string;
+  cajaTitulo: string;
+  cajaValor: string;
+  cajaSubtitulo: string;
+  cajaSubvalor: string;
+  sello: string;
+  datos: [string, string][];
+}
 
 export interface Finalista {
   dni: string;
@@ -170,7 +182,7 @@ export class CredencialFinalService {
     const suyo = (await this.finalistas()).find((f) => f.dni === String(dni).trim());
     if (!suyo) throw new NotFoundException('Ese DNI no figura entre los finalistas');
 
-    return this.construir([suyo]);
+    return this.construir([this.comoTarjeta(suyo)]);
   }
 
   /**
@@ -187,7 +199,7 @@ export class CredencialFinalService {
       throw new NotFoundException('Su delegación no tiene finalistas con aula asignada todavía');
     }
 
-    return this.construir(suyos);
+    return this.construir(suyos.map((f) => this.comoTarjeta(f)));
   }
 
   /** Todas, o las de un salón: lo que imprime la comisión. */
@@ -200,7 +212,7 @@ export class CredencialFinalService {
     if (lista.length === 0) {
       throw new NotFoundException('No hay finalistas con esos filtros');
     }
-    return this.construir(lista);
+    return this.construir(lista.map((f) => this.comoTarjeta(f)));
   }
 
   /**
@@ -295,13 +307,132 @@ export class CredencialFinalService {
     return { ok: true, avisados: suyos.length, institucion: tutor?.institucion || '' };
   }
 
+  // ----------------------------------------------------- los tutores
+
+  /**
+   * Los tutores que llevan finalistas, con lo que necesitan para entrar.
+   *
+   * El tutor acompaña a su delegación y pasa por la misma puerta: le toca
+   * credencial igual que a sus alumnos. La suya no lleva aula —va con los
+   * suyos— pero sí el turno al que tiene que estar, que es el de la gente que
+   * trae; si trae de los dos, los dos.
+   */
+  async tutoresFinalistas() {
+    const lista = await this.finalistas();
+    const ids = [...new Set(lista.map((f) => f.tutorId))];
+
+    const fichas = await this.prisma.tutor.findMany({
+      where: { id: { in: ids } },
+      select: {
+        id: true,
+        dni: true,
+        nombres: true,
+        apellidos: true,
+        celular: true,
+        correo: true,
+        institucion: true,
+      },
+    });
+
+    const { config } = await this.final.estado();
+
+    return fichas
+      .map((t) => {
+        const suyos = lista.filter((f) => f.tutorId === t.id);
+        const niveles = ORDEN_NIVELES.filter((n) => suyos.some((f) => f.nivel === n));
+
+        return {
+          tutorId: t.id,
+          nombres: `${t.nombres} ${t.apellidos}`.trim(),
+          dni: t.dni || '',
+          celular: t.celular || '',
+          correo: t.correo || '',
+          institucion: t.institucion || suyos[0]?.institucion || '',
+          finalistas: suyos.length,
+          niveles,
+          turnos: niveles
+            .map((n) => `${NIVEL_TEXTO[n]} ${config.bloques[n].inicio}`)
+            .join(' · '),
+          salones: [...new Set(suyos.map((f) => f.salon))].sort((a, b) => a - b),
+        };
+      })
+      .sort((a, b) => a.institucion.localeCompare(b.institucion, 'es'));
+  }
+
+  /** El tutor, con el mismo molde: cambia la caja y cambian las filas. */
+  private comoTarjetaTutor(t: {
+    nombres: string;
+    dni: string;
+    institucion: string;
+    finalistas: number;
+    turnos: string;
+    salones: number[];
+  }): Tarjeta {
+    return {
+      nombre: t.nombres,
+      cajaTitulo: 'CONDICIÓN',
+      cajaValor: 'TUTOR',
+      cajaSubtitulo: 'FINALISTAS',
+      cajaSubvalor: String(t.finalistas),
+      sello: 'CLASIFICADO',
+      datos: [
+        ['DNI', t.dni || '—'],
+        ['Cargo', 'Tutor responsable'],
+        ['Aulas', t.salones.join(', ') || '—'],
+        ['Turno', t.turnos || '—'],
+        ['I.E.', t.institucion || '—'],
+      ],
+    };
+  }
+
+  /** Las credenciales de los tutores: todas, una institución o una sola. */
+  async pdfTutores(
+    filtros: { tutorId?: string; q?: string } = {},
+    publica = true,
+  ): Promise<Buffer> {
+    if (publica) await this.comprobarAbierta();
+
+    let lista = await this.tutoresFinalistas();
+    if (filtros.tutorId) lista = lista.filter((t) => t.tutorId === filtros.tutorId);
+    if (filtros.q) {
+      const termino = sinTildes(filtros.q);
+      lista = lista.filter((t) =>
+        sinTildes(`${t.institucion} ${t.nombres} ${t.dni}`).includes(termino),
+      );
+    }
+
+    if (lista.length === 0) {
+      throw new NotFoundException('No hay tutores con finalistas que coincidan');
+    }
+    return this.construir(lista.map((t) => this.comoTarjetaTutor(t)));
+  }
+
+  /** El finalista, vestido con el molde de la tarjeta. */
+  private comoTarjeta(f: Finalista): Tarjeta {
+    return {
+      nombre: f.nombres,
+      cajaTitulo: 'AULA',
+      cajaValor: String(f.salon),
+      cajaSubtitulo: 'N° EN LA LISTA',
+      cajaSubvalor: String(f.puesto),
+      sello: 'CAT. ' + f.categoria,
+      datos: [
+        ['DNI', f.dni],
+        ['Grado', f.grado],
+        ['Nivel', NIVEL_TEXTO[f.nivel]],
+        ['Hora', f.hora],
+        ['I.E.', f.institucion || '—'],
+      ],
+    };
+  }
+
   /** Una de muestra, para ver el diseño antes de abrirlo a nadie. */
   async muestra(): Promise<Buffer> {
     const { config } = await this.final.estado();
     const bloque = config.bloques.PRIMARIA;
 
     return this.construir([
-      {
+      this.comoTarjeta({
         dni: '12345678',
         nombres: 'NOMBRE DEL ESTUDIANTE FINALISTA',
         institucion: 'INSTITUCIÓN EDUCATIVA DE EJEMPLO',
@@ -312,7 +443,7 @@ export class CredencialFinalService {
         salon: config.primerSalon.PRIMARIA,
         puesto: 7,
         hora: `${bloque.inicio} a ${bloque.fin}`,
-      },
+      }),
     ]);
   }
 
@@ -325,7 +456,7 @@ export class CredencialFinalService {
    * guillotina. Se dibuja un hilo de corte alrededor de cada una porque se
    * recortan a mano, de a cientos.
    */
-  private async construir(lista: Finalista[]): Promise<Buffer> {
+  private async construir(lista: Tarjeta[]): Promise<Buffer> {
     const [etapa, logo] = await Promise.all([this.etapas.una('MACRORREGIONAL'), this.logo()]);
     const { sede, fecha } = await this.estado();
 
@@ -388,7 +519,7 @@ export class CredencialFinalService {
    */
   private dibujar(
     doc: PDFKit.PDFDocument,
-    f: Finalista,
+    f: Tarjeta,
     marco: { etapa: any; logo: Buffer | null; sede: string; fecha: string },
     x: number,
     y: number,
@@ -460,18 +591,21 @@ export class CredencialFinalService {
     doc.roundedRect(cajaX, cajaY, cajaAncho, cajaAlto, 8).lineWidth(1).stroke(GRANATE);
 
     doc.fillColor(GRANATE).font('Helvetica-Bold').fontSize(6.5);
-    doc.text('AULA', cajaX, cajaY + 9, { width: cajaAncho, align: 'center' });
-    doc.fillColor(GRANATE_OSCURO).fontSize(26);
-    doc.text(String(f.salon), cajaX, cajaY + 19, { width: cajaAncho, align: 'center' });
+    doc.text(f.cajaTitulo, cajaX, cajaY + 9, { width: cajaAncho, align: 'center' });
+    doc.fillColor(GRANATE_OSCURO).fontSize(f.cajaValor.length > 3 ? 15 : 26);
+    doc.text(f.cajaValor, cajaX, cajaY + (f.cajaValor.length > 3 ? 24 : 19), {
+      width: cajaAncho,
+      align: 'center',
+    });
 
     doc.fillColor(GRANATE).font('Helvetica-Bold').fontSize(6.5);
-    doc.text('N° EN LA LISTA', cajaX, cajaY + 52, { width: cajaAncho, align: 'center' });
+    doc.text(f.cajaSubtitulo, cajaX, cajaY + 52, { width: cajaAncho, align: 'center' });
     doc.fillColor(GRANATE_OSCURO).fontSize(17);
-    doc.text(String(f.puesto), cajaX, cajaY + 61, { width: cajaAncho, align: 'center' });
+    doc.text(f.cajaSubvalor, cajaX, cajaY + 61, { width: cajaAncho, align: 'center' });
 
     doc.roundedRect(cajaX + 8, cajaY + cajaAlto - 20, cajaAncho - 16, 14, 7).fill(GRANATE);
     doc.fillColor(BLANCO).font('Helvetica-Bold').fontSize(7.5);
-    doc.text('CAT. ' + f.categoria, cajaX + 8, cajaY + cajaAlto - 16, {
+    doc.text(f.sello, cajaX + 8, cajaY + cajaAlto - 16, {
       width: cajaAncho - 16,
       align: 'center',
     });
@@ -488,7 +622,7 @@ export class CredencialFinalService {
     doc.font('Helvetica-Bold');
     while (tamanoNombre > 6.2) {
       doc.fontSize(tamanoNombre);
-      if (doc.heightOfString(f.nombres, { width: anchoValor, lineGap: -1 }) <= tamanoNombre * 2.3) {
+      if (doc.heightOfString(f.nombre, { width: anchoValor, lineGap: -1 }) <= tamanoNombre * 2.3) {
         break;
       }
       tamanoNombre -= 0.4;
@@ -499,25 +633,17 @@ export class CredencialFinalService {
     doc.text('Nombre', dx, dy, { width: anchoRotulo });
     doc.text(':', dx + anchoRotulo, dy, { width: 6 });
     doc.font('Helvetica-Bold').fontSize(tamanoNombre).fillColor(GRANATE_OSCURO);
-    doc.text(f.nombres, xValor, dy - 0.5, { width: anchoValor, lineGap: -1 });
+    doc.text(f.nombre, xValor, dy - 0.5, { width: anchoValor, lineGap: -1 });
     dy += Math.max(12, doc.y - (cajaY + 1) + 1.5);
 
-    const datos: [string, string][] = [
-      ['DNI', f.dni],
-      ['Grado', f.grado],
-      ['Nivel', NIVEL_TEXTO[f.nivel]],
-      ['Hora', f.hora],
-      ['I.E.', f.institucion || '—'],
-    ];
-
-    for (const [rotulo, valor] of datos) {
+    for (const [rotulo, valor] of f.datos) {
       doc.font('Helvetica').fontSize(7.5).fillColor(GRIS);
       doc.text(rotulo, dx, dy, { width: anchoRotulo });
       doc.text(':', dx + anchoRotulo, dy, { width: 6 });
 
       // El nombre de la institución es largo casi siempre, y cortarlo deja la
       // credencial sin decir de dónde viene: a esa fila se le dan dos líneas.
-      const dosLineas = rotulo === 'I.E.';
+      const dosLineas = rotulo === 'I.E.' || rotulo === 'Turno';
       doc.font('Helvetica-Bold').fontSize(dosLineas ? 6.8 : 7.5).fillColor(CARBON);
       doc.text(valor, xValor, dy + (dosLineas ? 0.6 : 0), {
         width: anchoValor,

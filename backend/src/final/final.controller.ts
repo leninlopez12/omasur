@@ -23,6 +23,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { PermisoGuard } from '../permisos/permiso.guard';
 import { CurrentUser, JwtUser, Permiso, Roles } from '../common/decorators';
+import { PermisosService } from '../permisos/permisos.service';
 
 const XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
@@ -33,6 +34,20 @@ const XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
  * decisiones del día y no hay permiso que las conceda.
  */
 const SoloAdmin = () => applyDecorators(UseGuards(JwtAuthGuard, RolesGuard), Roles('ADMIN'));
+
+/**
+ * Cada pantalla de la final se reparte por separado.
+ *
+ * El administrador entra siempre; de los supervisores, cada uno llega hasta
+ * donde le dieron permiso en Supervisores · Permisos. Las rutas que sirven a
+ * varias pantallas listan todas: basta tener una.
+ */
+const Comision = (...permisos: string[]) =>
+  applyDecorators(
+    UseGuards(JwtAuthGuard, RolesGuard, PermisoGuard),
+    Roles('ADMIN', 'SUPERVISOR'),
+    Permiso(...permisos),
+  );
 
 /**
  * Lo que sí se delega: el aula.
@@ -60,6 +75,7 @@ export class FinalController {
     private examen: ExamenFinalService,
     private resultados: ResultadosFinalService,
     private credencial: CredencialFinalService,
+    private permisos: PermisosService,
   ) {}
 
   // ------------------------------------------------------------------ público
@@ -112,6 +128,14 @@ export class FinalController {
 
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('TUTOR')
+  @Get('mi-credencial')
+  async miCredencialFinal(@CurrentUser() usuario: JwtUser, @Res() res: Response) {
+    const pdf = await this.credencial.pdfTutores({ tutorId: usuario.sub });
+    this.enviarPdf(res, pdf, 'mi-credencial-finalista.pdf');
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('TUTOR')
   @Get('mis-finalistas/credenciales')
   async credencialesDeMisFinalistas(@CurrentUser() usuario: JwtUser, @Res() res: Response) {
     const pdf = await this.credencial.pdfDeTutor(usuario.sub);
@@ -120,25 +144,25 @@ export class FinalController {
 
   // ------------------------------------------------------ salones y horarios
 
-  @SoloAdmin()
+  @Comision('final-salones', 'final-reparto', 'supervisores-final')
   @Get('salones')
   salones() {
     return this.final.estado();
   }
 
-  @SoloAdmin()
+  @Comision('final-salones', 'final-reparto', 'supervisores-final')
   @Post('config')
   guardarConfig(@Body() body: any) {
     return this.final.guardarConfig(body || {});
   }
 
-  @SoloAdmin()
+  @Comision('final-salones')
   @Post('salones/generar')
   generar() {
     return this.final.generar();
   }
 
-  @SoloAdmin()
+  @Comision('final-salones')
   @Delete('salones')
   borrarSorteo() {
     return this.final.borrarSorteo();
@@ -146,31 +170,31 @@ export class FinalController {
 
   // --------------------------------------------------- acomodar a mano
 
-  @SoloAdmin()
+  @Comision('final-reparto')
   @Post('salones/mover')
   mover(@Body() body: { dni?: string; nivel?: string; salon?: number }) {
     return this.final.moverAlumno(body?.dni || '', body?.nivel || '', Number(body?.salon));
   }
 
-  @SoloAdmin()
+  @Comision('final-reparto')
   @Post('salones/sacar')
   sacar(@Body() body: { dni?: string }) {
     return this.final.sacarAlumno(body?.dni || '');
   }
 
-  @SoloAdmin()
+  @Comision('final-reparto')
   @Post('salones/nuevo')
   crearSalon(@Body() body: { nivel?: string }) {
     return this.final.crearSalon(body?.nivel || '');
   }
 
-  @SoloAdmin()
+  @Comision('final-reparto')
   @Delete('salones/:nivel/:numero')
   borrarSalon(@Param('nivel') nivel: string, @Param('numero') numero: string) {
     return this.final.borrarSalon(nivel, Number(numero));
   }
 
-  @SoloAdmin()
+  @Comision('final-salones', 'final-reparto', 'supervisores-final')
   @Post('salones/:nivel/:numero/responsable')
   asignar(
     @Param('nivel') nivel: string,
@@ -182,8 +206,14 @@ export class FinalController {
 
   // ------------------------------------------------- las listas del examen
 
-  /** La lista de la puerta. El responsable baja la suya; el admin, todas. */
-  @Responsable()
+  /**
+   * La lista de la puerta.
+   *
+   * Dos permisos distintos llegan aquí: quien tiene la pantalla de listas baja
+   * las que quiera, y el responsable de aula solo la suya. Por eso no alcanza
+   * con el permiso: también se mira de qué salón se trata.
+   */
+  @Comision('final-listas', 'final-salon')
   @Get('listas/excel')
   async excelSalones(
     @Query('nivel') nivel: string,
@@ -191,9 +221,13 @@ export class FinalController {
     @CurrentUser() usuario: JwtUser,
     @Res() res: Response,
   ) {
-    if (salon) await this.soloSuSalon(usuario, nivel, salon);
-    else if (usuario.rol !== 'ADMIN') {
-      throw new ForbiddenException('Solo puede bajar la lista de los salones a su cargo.');
+    const deTodos = await this.permisos.tiene(usuario, ['final-listas']);
+
+    if (!deTodos) {
+      if (!salon) {
+        throw new ForbiddenException('Solo puede bajar la lista de los salones a su cargo.');
+      }
+      await this.soloSuSalon(usuario, nivel, salon);
     }
 
     const { buffer, nombre } = await this.final.excel({
@@ -226,43 +260,43 @@ export class FinalController {
     return { ...resto, estructura, categoriasConClave: Object.keys(claves).sort() };
   }
 
-  @SoloAdmin()
+  @Comision('final-clave')
   @Post('examen/clave')
   guardarClave(@Body() body: { categoria?: string; clave?: unknown }) {
     return this.examen.guardarClave(body?.categoria || '', body?.clave);
   }
 
-  @SoloAdmin()
+  @Comision('final-clave')
   @Delete('examen/clave/:categoria')
   borrarClave(@Param('categoria') categoria: string) {
     return this.examen.borrarClave(categoria);
   }
 
-  @SoloAdmin()
+  @Comision('final-puntaje')
   @Post('examen/puntajes')
   guardarPuntajes(@Body() body: any) {
     return this.examen.guardarPuntajes(body || {});
   }
 
-  @SoloAdmin()
+  @Comision('final-puntaje')
   @Post('examen/abrir')
   abrir(@Body() body: { abierto?: boolean }) {
     return this.examen.abrir(Boolean(body?.abierto));
   }
 
-  @SoloAdmin()
+  @Comision('final-envios')
   @Get('examen')
   entregas() {
     return this.examen.entregas();
   }
 
-  @SoloAdmin()
+  @Comision('final-envios')
   @Get('consolidado')
   consolidado() {
     return this.examen.consolidado();
   }
 
-  @SoloAdmin()
+  @Comision('final-envios')
   @Get('consolidado/excel')
   async excelConsolidado(@Res() res: Response) {
     const { buffer, nombre } = await this.examen.excelConsolidado();
@@ -311,13 +345,13 @@ export class FinalController {
     });
   }
 
-  @SoloAdmin()
+  @Comision('final-envios', 'final-llenar')
   @Delete('examen/:nivel/:numero')
   anular(@Param('nivel') nivel: string, @Param('numero') numero: string) {
     return this.examen.anular(nivel, Number(numero));
   }
 
-  @SoloAdmin()
+  @Comision('final-envios')
   @Post('examen/:nivel/:numero/corregir')
   corregir(
     @Param('nivel') nivel: string,
@@ -353,26 +387,26 @@ export class FinalController {
 
   // ------------------------------------------- credenciales de los finalistas
 
-  @SoloAdmin()
+  @Comision('final-credenciales')
   @Get('credencial')
   estadoDeCredenciales() {
     return this.credencial.estado();
   }
 
-  @SoloAdmin()
+  @Comision('final-credenciales')
   @Post('credencial/abrir')
   abrirCredencial(@Body() body: { abierta?: boolean }) {
     return this.credencial.abrir(Boolean(body?.abierta));
   }
 
-  @SoloAdmin()
+  @Comision('final-credenciales')
   @Get('credencial/muestra')
   async muestraCredencial(@Res() res: Response) {
     this.enviarPdf(res, await this.credencial.muestra(), 'muestra-credencial-final.pdf');
   }
 
   /** Todas, o las de un salón o un turno: lo que imprime la comisión. */
-  @SoloAdmin()
+  @Comision('final-credenciales')
   @Get('credencial/pdf')
   async credencialesComision(
     @Query('nivel') nivel: string,
@@ -390,15 +424,37 @@ export class FinalController {
     );
   }
 
+  /** Los tutores que llevan finalistas, para su propia credencial. */
+  @Comision('final-cred-tutores')
+  @Get('credencial/tutores')
+  tutoresFinalistas() {
+    return this.credencial.tutoresFinalistas();
+  }
+
+  /** En bloque, o las de una institución, o la de un tutor. */
+  @Comision('final-cred-tutores')
+  @Get('credencial/tutores/pdf')
+  async credencialesDeTutores(
+    @Query('q') q: string,
+    @Query('tutorId') tutorId: string,
+    @Res() res: Response,
+  ) {
+    const pdf = await this.credencial.pdfTutores(
+      { q: q || undefined, tutorId: tutorId || undefined },
+      false,
+    );
+    this.enviarPdf(res, pdf, 'credenciales-tutores-finalistas.pdf');
+  }
+
   /** Buscar finalistas por colegio, tutor, nombre o DNI. */
-  @SoloAdmin()
+  @Comision('final-busqueda')
   @Get('credencial/buscar')
   buscarCredenciales(@Query('q') q: string) {
     return this.credencial.buscar(q);
   }
 
   /** La de un alumno suelto, sin exigir que la descarga esté abierta. */
-  @SoloAdmin()
+  @Comision('final-busqueda')
   @Get('credencial/alumno/:dni')
   async credencialDeAlumno(@Param('dni') dni: string, @Res() res: Response) {
     const pdf = await this.credencial.pdfPorDni(dni, false);
@@ -406,14 +462,14 @@ export class FinalController {
   }
 
   /** Le avisa al tutor por su panel que ya puede descargarlas. */
-  @SoloAdmin()
+  @Comision('final-busqueda')
   @Post('credencial/avisar/:tutorId')
   avisarCredenciales(@Param('tutorId') tutorId: string, @CurrentUser() usuario: JwtUser) {
     return this.credencial.avisar(tutorId, usuario.nombre || 'La comisión');
   }
 
   /** Las de una delegación, para atender al tutor que no puede entrar. */
-  @SoloAdmin()
+  @Comision('final-busqueda')
   @Get('credencial/delegacion/:tutorId')
   async credencialesDeDelegacion(@Param('tutorId') tutorId: string, @Res() res: Response) {
     const pdf = await this.credencial.pdfDeTutor(tutorId, false);
@@ -422,43 +478,43 @@ export class FinalController {
 
   // ------------------------------------------------------- resultados finales
 
-  @SoloAdmin()
+  @Comision('final-general')
   @Get('resultados')
   general() {
     return this.resultados.general();
   }
 
-  @SoloAdmin()
+  @Comision('final-top')
   @Get('resultados/top')
   top(@Query('puestos') puestos?: string) {
     return this.resultados.top(Number(puestos) || undefined);
   }
 
-  @SoloAdmin()
+  @Comision('final-premiacion')
   @Get('resultados/premiacion')
   premiacion(@Query('puestos') puestos?: string) {
     return this.resultados.premiacion(Number(puestos) || undefined);
   }
 
-  @SoloAdmin()
+  @Comision('final-consultar')
   @Get('resultados/buscar')
   buscar(@Query('q') q: string) {
     return this.resultados.buscar(q);
   }
 
-  @SoloAdmin()
+  @Comision('final-publicacion')
   @Post('resultados/publicar')
   publicar(@Body() body: { publicado?: boolean }) {
     return this.resultados.publicar(Boolean(body?.publicado));
   }
 
-  @SoloAdmin()
+  @Comision('final-publicacion')
   @Post('resultados/ajustes')
   ajustes(@Body() body: any) {
     return this.resultados.guardarAjustes(body || {});
   }
 
-  @SoloAdmin()
+  @Comision('final-general')
   @Get('resultados/excel')
   async excelResultados(@Query('solo') solo: string, @Res() res: Response) {
     const { buffer, nombre } = await this.resultados.excel(solo === 'premiados');

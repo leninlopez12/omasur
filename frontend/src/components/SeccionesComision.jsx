@@ -1,30 +1,42 @@
 import {
+  ArrowRightLeft,
   Award,
+  Ban,
+  Calculator,
   CalendarCheck,
   ClipboardCheck,
   ClipboardList,
+  DoorOpen,
   FileSpreadsheet,
   FileText,
+  Flag,
+  FlaskConical,
   GraduationCap as IconoGrado,
   IdCard,
   ImageIcon,
+  Inbox,
   Landmark,
   LayoutDashboard,
+  ListChecks,
   LogIn,
   Mail,
   Medal,
   Megaphone,
   MessageCircle,
   PencilLine,
+  Printer,
+  School,
   QrCode,
   ReceiptText,
   Search,
   Settings,
-  Trophy,
-  UserCheck,
   ShieldCheck,
+  Trophy,
+  Upload,
+  UserCheck,
   UserCog,
   Users,
+  Video,
   Wallet,
 } from 'lucide-react';
 import IconoWhatsApp from './IconoWhatsApp.jsx';
@@ -51,6 +63,7 @@ import Comunicados from './Comunicados.jsx';
 import CredencialesComision from './CredencialesComision.jsx';
 import Tablero from './Tablero.jsx';
 import PermisosSupervisores from './PermisosSupervisores.jsx';
+import SupervisoresFinal from './SupervisoresFinal.jsx';
 import TutoresClasificados from './TutoresClasificados.jsx';
 import {
   ConsultaPublica,
@@ -59,6 +72,43 @@ import {
   ModuloResultados,
   ResultadosGeneral,
 } from './Resultados.jsx';
+import {
+  ExamenClave,
+  ExamenPrueba,
+  ExamenPuntaje,
+  ExamenRespuestas,
+  ExamenTutorial,
+} from './ExamenConfig.jsx';
+import {
+  ExamenAnular,
+  ExamenCorregir,
+  ExamenLlenar,
+} from './ExamenDelegacion.jsx';
+import {
+  ExamenConsolidado,
+  ExamenConsultas,
+  ExamenEntregas,
+  ExamenEnviadas,
+} from './ExamenEntregas.jsx';
+import FinalSalones from './FinalSalones.jsx';
+import FinalReparto from './FinalReparto.jsx';
+import FinalCredenciales from './FinalCredenciales.jsx';
+import FinalListas from './FinalListas.jsx';
+import FinalBusquedaCredenciales from './FinalBusquedaCredenciales.jsx';
+import FinalCredencialesTutores from './FinalCredencialesTutores.jsx';
+import {
+  FinalExamenClave,
+  FinalExamenEnvios,
+  FinalExamenLlenar,
+  FinalExamenPuntaje,
+} from './FinalExamen.jsx';
+import {
+  FinalConsultar,
+  FinalPremiacion,
+  FinalPublicacion,
+  FinalResultadosGeneral,
+  FinalResultadosTop,
+} from './FinalResultados.jsx';
 import { useAjustes } from '../lib/ajustes';
 
 /**
@@ -69,9 +119,9 @@ import { useAjustes } from '../lib/ajustes';
  * depende: el panel filtra la lista con `filtrarSecciones` y pinta el
  * contenido con `ContenidoComision`, que es el mismo para los dos.
  *
- * El examen no está aquí porque los dos paneles no muestran lo mismo: el
- * supervisor tiene una versión de solo lectura de la clave y no puede anular
- * ni corregir envíos. Cada panel arma ese grupo por su cuenta.
+ * Los cuatro grupos del examen y los resultados no van sueltos: cada uno
+ * cuelga de su etapa —`ETAPA_FINAL` y `ETAPA_INSTITUCIONAL`—, que es lo que
+ * los paneles ponen en el sidebar.
  */
 export const SECCION_RESULTADOS = {
   id: 'resultados',
@@ -130,18 +180,128 @@ export const SECCION_RESULTADOS = {
  * buscaría. Las cuentas y los permisos son dos caras de lo mismo, así que van
  * juntas y en su propio sitio.
  */
+/**
+ * El examen completo: solo el administrador.
+ *
+ * Define la prueba, la puntúa, anula envíos y corrige respuestas. Cada
+ * pantalla se reparte por separado: una cosa es recibir actas y otra decidir
+ * qué respuesta es la correcta.
+ */
+export const SECCION_EXAMEN = {
+  id: 'examen',
+  texto: 'Examen',
+  icono: FileSpreadsheet,
+  hijos: [
+    { id: 'examen-respuestas', texto: 'Respuestas correctas', icono: ListChecks, permiso: 'examen-respuestas' },
+    { id: 'examen-puntaje', texto: 'Puntaje', icono: Calculator, permiso: 'examen-puntaje' },
+    { id: 'examen-prueba', texto: 'Probar el envío', icono: FlaskConical, permiso: 'examen-prueba' },
+    { id: 'examen-entregas', texto: 'Entregas recibidas', icono: Inbox, permiso: 'examen-entregas' },
+    { id: 'examen-llenar', texto: 'Llenar por delegación', icono: Upload, permiso: 'examen-llenar' },
+    { id: 'examen-anular', texto: 'Anular envío', icono: Ban, permiso: 'examen-anular' },
+    { id: 'examen-corregir', texto: 'Corregir respuestas', icono: PencilLine, permiso: 'examen-corregir' },
+    { id: 'examen-consultas', texto: 'Consultas de envíos', icono: Search, permiso: 'examen-consultas' },
+    { id: 'examen-consolidado', texto: 'Consolidado', icono: ClipboardList, permiso: 'examen-consolidado' },
+    { id: 'examen-enviadas', texto: 'Respuestas enviadas', icono: FileSpreadsheet, permiso: 'examen-enviadas' },
+    { id: 'examen-tutorial', texto: 'Video tutorial', icono: Video, permiso: 'examen-tutorial' },
+    // La misma clave, sin poder tocarla: es lo que se le da a quien acompaña
+    // el examen pero no lo define. Al administrador no se le muestra porque ya
+    // tiene la de arriba, que además deja editar.
+    {
+      id: 'examen-clave',
+      texto: 'Ver respuestas correctas',
+      icono: ListChecks,
+      permiso: 'examen-clave',
+      soloSupervisor: true,
+    },
+  ],
+};
+
+/**
+ * La etapa final macrorregional, que va arriba de todo.
+ *
+ * El examen y los resultados de más abajo son los de la etapa institucional,
+ * la que ya pasó. Estos dos son los del 08 de noviembre, presencial y en una
+ * sola sede, y son lo que se está trabajando ahora: por eso encabezan.
+ *
+ * Se reparten pantalla por pantalla como el resto: el administrador decide
+ * quién entra a cada una desde Supervisores · Permisos.
+ */
+export const SECCION_EXAMEN_FINAL = {
+  id: 'final-examen',
+  texto: 'Examen final',
+  icono: ClipboardCheck,
+  hijos: [
+    { id: 'final-salones', texto: 'Salones y horarios', icono: DoorOpen, permiso: 'final-salones' },
+    { id: 'final-reparto', texto: 'Reparto de alumnos', icono: ArrowRightLeft, permiso: 'final-reparto' },
+    { id: 'final-listas', texto: 'Lista de salones', icono: Printer, permiso: 'final-listas' },
+    { id: 'final-clave', texto: 'Respuestas correctas', icono: ListChecks, permiso: 'final-clave' },
+    { id: 'final-puntaje', texto: 'Puntaje y apertura', icono: Calculator, permiso: 'final-puntaje' },
+    { id: 'final-llenar', texto: 'Llenar por salón', icono: Upload, permiso: 'final-llenar' },
+    { id: 'final-envios', texto: 'Consulta de envíos', icono: Inbox, permiso: 'final-envios' },
+    { id: 'final-credenciales', texto: 'Credenciales', icono: IdCard, permiso: 'final-credenciales' },
+    { id: 'final-busqueda', texto: 'Credenciales de alumnos', icono: Search, permiso: 'final-busqueda' },
+    { id: 'final-cred-tutores', texto: 'Credenciales de tutores', icono: UserCheck, permiso: 'final-cred-tutores' },
+  ],
+};
+
+export const SECCION_RESULTADOS_FINAL = {
+  id: 'final-resultados',
+  texto: 'Resultados finales',
+  icono: Trophy,
+  hijos: [
+    { id: 'final-general', texto: 'General', icono: Award, permiso: 'final-general' },
+    { id: 'final-top', texto: 'Por categoría', icono: Trophy, permiso: 'final-top' },
+    { id: 'final-premiacion', texto: 'Premiación', icono: Medal, permiso: 'final-premiacion' },
+    { id: 'final-consultar', texto: 'Consultar', icono: Search, permiso: 'final-consultar' },
+    { id: 'final-publicacion', texto: 'Publicación y consulta', icono: Megaphone, permiso: 'final-publicacion' },
+  ],
+};
+
+
+/**
+ * Las dos etapas, cada una con su examen y sus resultados.
+ *
+ * Antes los cuatro grupos colgaban del sidebar uno tras otro y era fácil
+ * confundirse: «Respuestas correctas» sale dos veces, «Consulta de envíos»
+ * también, y nada decía de qué etapa era cada una. Metiéndolos dentro de su
+ * etapa, el nombre del grupo ya no tiene que cargar con esa distinción.
+ *
+ * La etapa no es una pantalla: no tiene permiso propio, y lo que se reparte
+ * sigue siendo cada pantalla de adentro.
+ */
+export const ETAPA_FINAL = {
+  id: 'etapa-final',
+  texto: 'Final macrorregional',
+  icono: Flag,
+  hijos: [SECCION_EXAMEN_FINAL, SECCION_RESULTADOS_FINAL],
+};
+
+export const ETAPA_INSTITUCIONAL = {
+  id: 'etapa-institucional',
+  texto: 'Clasificatoria institucional',
+  icono: School,
+  hijos: [SECCION_EXAMEN, SECCION_RESULTADOS],
+};
+
 export const SECCION_SUPERVISORES = {
   id: 'supervisores',
   texto: 'Supervisores',
   icono: UserCog,
   hijos: [
-    // Crear y borrar cuentas no se delega: es la llave del equipo entero.
-    { id: 'supervisores-cuentas', texto: 'Cuentas', icono: UserCheck, soloAdmin: true },
+    { id: 'supervisores-cuentas', texto: 'Cuentas', icono: UserCheck, permiso: 'supervisores-cuentas' },
     {
       id: 'supervisores-permisos',
       texto: 'Permisos',
       icono: ShieldCheck,
       permiso: 'supervisores-permisos',
+    },
+    // El atajo del día del examen: las aulas y el permiso de subir actas, que
+    // son dos cosas distintas y las dos hacen falta.
+    {
+      id: 'supervisores-final',
+      texto: 'Examen final',
+      icono: DoorOpen,
+      permiso: 'supervisores-final',
     },
   ],
 };
@@ -198,6 +358,34 @@ export const SECCIONES_PANEL = [
 ];
 
 export const TITULOS_COMISION = {
+  'final-salones': 'Final · Salones y horarios',
+  'final-reparto': 'Final · Reparto de alumnos',
+  'final-listas': 'Final · Lista de salones para el examen',
+  'final-clave': 'Final · Respuestas correctas',
+  'final-puntaje': 'Final · Puntaje y apertura',
+  'final-llenar': 'Final · Llenar por salón',
+  'final-envios': 'Final · Consulta de envíos',
+  'final-credenciales': 'Final · Credenciales de finalistas',
+  'final-busqueda': 'Final · Búsqueda de credenciales de alumnos',
+  'final-cred-tutores': 'Final · Credenciales de tutores',
+  'final-general': 'Final · General',
+  'final-top': 'Final · Por categoría',
+  'final-premiacion': 'Final · Premiación',
+  'final-consultar': 'Final · Consultar',
+  'final-publicacion': 'Final · Publicación y consulta',
+  'examen-respuestas': 'Examen · Respuestas correctas',
+  'examen-puntaje': 'Examen · Puntaje',
+  'examen-prueba': 'Examen · Probar el envío',
+  'examen-entregas': 'Examen · Entregas recibidas',
+  'examen-llenar': 'Examen · Llenar por delegación',
+  'examen-anular': 'Examen · Anular envío',
+  'examen-corregir': 'Examen · Corregir respuestas',
+  'examen-consultas': 'Examen · Consultas de envíos',
+  'examen-consolidado': 'Examen · Consolidado',
+  'examen-enviadas': 'Examen · Respuestas enviadas',
+  'examen-tutorial': 'Examen · Video tutorial',
+  'examen-clave': 'Examen · Ver respuestas correctas',
+
   'resultados-tutores': 'Resultados · Enviadas por los tutores',
   'resultados-comision': 'Resultados · Llenadas por la comisión',
   'resultados-decidir': 'Resultados · Decidir a mano',
@@ -207,6 +395,7 @@ export const TITULOS_COMISION = {
   'resultados-publica': 'Resultados · Hacer pública la consulta',
   'supervisores-cuentas': 'Supervisores · Cuentas',
   'supervisores-permisos': 'Supervisores · Permisos',
+  'supervisores-final': 'Supervisores · Examen final',
   tablero: 'Tablero general',
   'revisar-alumnos': 'Inscripciones por alumno',
   inscripciones: 'Delegaciones',
@@ -238,23 +427,27 @@ export const TITULOS_COMISION = {
  * hijos desaparece, para no dejar un título que no abre nada.
  */
 export function filtrarSecciones(secciones, permisos) {
-  if (permisos === null) return secciones;
+  // El administrador pasa todo, salvo lo que existe solo para el supervisor:
+  // él ya tiene la versión completa de esa misma pantalla.
+  const cabe =
+    permisos === null
+      ? (s) => !s.soloSupervisor
+      : (s) => (!s.permiso || permisos.includes(s.permiso)) && !s.soloAdmin;
 
-  const cabe = (s) => (!s.permiso || permisos.includes(s.permiso)) && !s.soloAdmin;
+  // Baja por niveles porque ahora hay tres: etapa, sección y pantalla.
+  const podar = (s) => {
+    if (!cabe(s)) return null;
+    if (!s.hijos) return s;
+    const hijos = s.hijos.map(podar).filter(Boolean);
+    return hijos.length ? { ...s, hijos } : null;
+  };
 
-  return secciones
-    .map((s) => {
-      if (!cabe(s)) return null;
-      if (!s.hijos) return s;
-      const hijos = s.hijos.filter(cabe);
-      return hijos.length ? { ...s, hijos } : null;
-    })
-    .filter(Boolean);
+  return secciones.map(podar).filter(Boolean);
 }
 
-/** Todos los ids que quedan después de filtrar, ya aplanados. */
+/** Todas las pantallas que quedan después de filtrar, ya aplanadas. */
 export function idsVisibles(secciones) {
-  return secciones.flatMap((s) => (s.hijos ? s.hijos.map((h) => h.id) : [s.id]));
+  return secciones.flatMap((s) => (s.hijos ? idsVisibles(s.hijos) : [s.id]));
 }
 
 /**
@@ -268,6 +461,34 @@ export function ContenidoComision({ seccion, detalleId, setDetalleId, irA, abrir
 
   return (
     <>
+      {seccion === 'final-salones' && <FinalSalones />}
+      {seccion === 'final-reparto' && <FinalReparto />}
+      {seccion === 'final-listas' && <FinalListas />}
+      {seccion === 'final-clave' && <FinalExamenClave />}
+      {seccion === 'final-puntaje' && <FinalExamenPuntaje />}
+      {seccion === 'final-llenar' && <FinalExamenLlenar />}
+      {seccion === 'final-envios' && <FinalExamenEnvios />}
+      {seccion === 'final-credenciales' && <FinalCredenciales />}
+      {seccion === 'final-busqueda' && <FinalBusquedaCredenciales />}
+      {seccion === 'final-cred-tutores' && <FinalCredencialesTutores />}
+      {seccion === 'final-general' && <FinalResultadosGeneral />}
+      {seccion === 'final-top' && <FinalResultadosTop />}
+      {seccion === 'final-premiacion' && <FinalPremiacion />}
+      {seccion === 'final-consultar' && <FinalConsultar />}
+      {seccion === 'final-publicacion' && <FinalPublicacion />}
+      {seccion === 'examen-respuestas' && <ExamenRespuestas />}
+      {seccion === 'examen-puntaje' && <ExamenPuntaje />}
+      {seccion === 'examen-prueba' && <ExamenPrueba />}
+      {seccion === 'examen-entregas' && <ExamenEntregas />}
+      {seccion === 'examen-llenar' && <ExamenLlenar />}
+      {seccion === 'examen-anular' && <ExamenAnular />}
+      {seccion === 'examen-corregir' && <ExamenCorregir />}
+      {seccion === 'examen-consultas' && <ExamenConsultas />}
+      {seccion === 'examen-consolidado' && <ExamenConsolidado />}
+      {seccion === 'examen-enviadas' && <ExamenEnviadas />}
+      {seccion === 'examen-tutorial' && <ExamenTutorial />}
+      {seccion === 'examen-clave' && <ExamenClave />}
+
       {seccion === 'resultados-tutores' && <ModuloResultados ola="tutores" />}
       {seccion === 'resultados-comision' && <ModuloResultados ola="comision" />}
       {seccion === 'resultados-decidir' && <DecidirAlumnos />}
@@ -330,6 +551,7 @@ export function ContenidoComision({ seccion, detalleId, setDetalleId, irA, abrir
       )}
       {seccion === 'supervisores-cuentas' && <Supervisores />}
       {seccion === 'supervisores-permisos' && <PermisosSupervisores />}
+      {seccion === 'supervisores-final' && <SupervisoresFinal />}
       {seccion === 'ajustes-avisos' && <Avisos />}
     </>
   );

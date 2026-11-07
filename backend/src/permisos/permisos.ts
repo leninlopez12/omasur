@@ -12,14 +12,32 @@
 /**
  * La etapa final macrorregional.
  *
- * Lo único que se reparte es el aula del responsable, y es distinto de todos
- * los demás: no abre un módulo, abre el aula que le tocó. Qué aula es lo dice
- * el reparto de salones, no el permiso.
- *
- * Lo demás de la final —la clave, el reparto, la premiación— se queda en el
- * administrador y no hay forma de concederlo.
+ *  es distinto de los demás: no abre una pantalla del panel, abre
+ * el aula que le tocó al responsable. Qué aula es lo dice el reparto de
+ * salones, no el permiso. El resto son las pantallas de siempre.
  */
-export const PERMISOS_FINAL = ['final-salon'] as const;
+export const PERMISOS_FINAL = [
+  'final-salon',
+  'final-salones',
+  'final-reparto',
+  'final-listas',
+  'final-clave',
+  'final-puntaje',
+  'final-llenar',
+  'final-envios',
+  'final-credenciales',
+  'final-busqueda',
+  'final-cred-tutores',
+] as const;
+
+/** Resultados de la final macrorregional. */
+export const PERMISOS_FINAL_RESULTADOS = [
+  'final-general',
+  'final-top',
+  'final-premiacion',
+  'final-consultar',
+  'final-publicacion',
+] as const;
 
 /** Resultados de la etapa institucional. */
 export const PERMISOS_RESULTADOS = [
@@ -35,13 +53,23 @@ export const PERMISOS_RESULTADOS = [
 /**
  * Supervisores.
  *
- * Repartir permisos sí se delega —con el cerrojo de que nadie cambia los
- * suyos—; crear y borrar cuentas no, que es la llave del equipo entero.
+ * Repartir permisos lleva el cerrojo de que nadie cambia los suyos. Las
+ * cuentas se reparten también, pero conviene pensarlo: quien entre ahí crea y
+ * borra supervisores.
  */
-export const PERMISOS_SUPERVISORES = ['supervisores-permisos'] as const;
+export const PERMISOS_SUPERVISORES = [
+  'supervisores-permisos',
+  'supervisores-cuentas',
+  'supervisores-final',
+] as const;
 
-/** El examen institucional, en la versión recortada del supervisor. */
+/** El examen institucional, pantalla por pantalla. */
 export const PERMISOS_EXAMEN = [
+  'examen-respuestas',
+  'examen-puntaje',
+  'examen-anular',
+  'examen-corregir',
+  'examen-tutorial',
   'examen-llenar',
   'examen-entregas',
   'examen-consultas',
@@ -80,6 +108,7 @@ export const PERMISOS_PANEL = [
 
 export const PERMISOS = [
   ...PERMISOS_FINAL,
+  ...PERMISOS_FINAL_RESULTADOS,
   ...PERMISOS_RESULTADOS,
   ...PERMISOS_SUPERVISORES,
   ...PERMISOS_EXAMEN,

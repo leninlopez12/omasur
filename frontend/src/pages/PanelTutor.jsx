@@ -29,7 +29,7 @@ import Campanita from '../components/Campanita.jsx';
 import AvisosEnVivo from '../components/AvisosEnVivo.jsx';
 import { NotificacionesProvider } from '../lib/notificaciones.jsx';
 import GestorAlumnos from '../components/GestorAlumnos.jsx';
-import CredencialesFinalistas from '../components/CredencialesFinalistas.jsx';
+import CredencialesFinalistas, { AvisoFinalistas } from '../components/CredencialesFinalistas.jsx';
 import PasoPago, { Confirmado } from '../components/PasoPago.jsx';
 import MisInscripciones from '../components/MisInscripciones.jsx';
 import RespuestasExamen, { AvisoExamen } from '../components/RespuestasExamen.jsx';
@@ -65,9 +65,9 @@ const SECCIONES = [
   { id: 'pago-quienes', texto: 'Seleccionar estudiantes', icono: UserCheck },
   { id: 'pago', texto: 'Comprobante de pago', icono: CreditCard },
   { id: 'historial', texto: 'Inscripciones', icono: ReceiptText },
-  { id: 'credenciales', texto: 'Credenciales', icono: IdCard },
   { id: 'credenciales-finalistas', texto: 'Credencial FINALISTAS', icono: Medal },
   { id: 'mi-credencial', texto: 'Mi credencial', icono: BadgeCheck },
+  { id: 'credenciales', texto: 'Credenciales institucionales', icono: IdCard },
 ];
 
 /** Va abajo del sidebar, junto a cerrar sesión. */
@@ -80,7 +80,7 @@ const TITULOS = {
   alumnos: 'Mis estudiantes',
   'pago-quienes': 'Pago de la delegación',
   pago: 'Comprobante de pago',
-  credenciales: 'Credenciales de mis estudiantes',
+  credenciales: 'Credenciales de la etapa institucional',
   'credenciales-finalistas': 'Credencial FINALISTAS',
   'mi-credencial': 'Mi credencial',
   historial: 'Inscripciones',
@@ -101,6 +101,9 @@ function Contenido() {
   const [examen, setExamen] = useState(null);
   // La clasificación aparece recién cuando la comisión publica su tanda.
   const [clasificacion, setClasificacion] = useState(null);
+  // La final tiene su propia credencial, y mientras esté abierta es la que
+  // importa: las de la institucional ya no sirven para entrar a ninguna parte.
+  const [final, setFinal] = useState(null);
 
   const cargar = useCallback(async () => {
     const { data } = await api.get('/tutores/resumen');
@@ -118,21 +121,35 @@ function Contenido() {
       .get('/resultados/mi-clasificacion')
       .then(({ data }) => setClasificacion(data))
       .catch(() => setClasificacion(null));
+
+    api
+      .get('/final/mis-finalistas')
+      .then(({ data }) => setFinal(data))
+      .catch(() => setFinal(null));
   }, [cargar]);
 
   const clasificado = Boolean(clasificacion?.publicado);
+  // Abierta y con gente suya dentro: si no lleva finalistas, la sección no le
+  // dice nada y no tiene por qué ocuparle sitio.
+  const enFinal = Boolean(final?.abierta && final.finalistas?.length);
 
   // Cada sección se muestra solo cuando le toca, y se resalta solo mientras
   // sea lo siguiente que hay que mirar: el examen en ámbar mientras falte
   // enviarlo, y los clasificados en verde apenas salen.
   const secciones = SECCIONES.filter(
     (s) =>
-      (s.id !== 'examen' || examen?.habilitado) && (s.id !== 'clasificacion' || clasificado),
+      (s.id !== 'examen' || examen?.habilitado) &&
+      (s.id !== 'clasificacion' || clasificado) &&
+      (s.id !== 'credenciales-finalistas' || enFinal) &&
+      // Ya estamos en la final: la credencial de la institucional no abre
+      // ninguna puerta y solo confundiría al lado de la que sí.
+      (s.id !== 'credenciales' || !enFinal),
   ).map((s) => {
     if (s.id === 'examen') {
       return { ...s, destacado: Boolean(examen?.abierto && !examen?.entrega) && !clasificado };
     }
     if (s.id === 'clasificacion') return { ...s, destacado: 'verde' };
+    if (s.id === 'credenciales-finalistas') return { ...s, destacado: 'verde' };
     return s;
   });
 
@@ -156,6 +173,11 @@ function Contenido() {
         publicado={clasificado}
         publicadoEn={clasificacion?.publicadoEn}
         alIr={() => setSeccion('clasificacion')}
+      />
+      <AvisoFinalistas
+        abierta={enFinal}
+        finalistas={final?.finalistas?.length}
+        alIr={() => setSeccion('credenciales-finalistas')}
       />
 
       {!resumen ? (
@@ -181,7 +203,7 @@ function Contenido() {
           )}
           {seccion === 'credenciales' && <SeccionCredenciales resumen={resumen} />}
           {seccion === 'credenciales-finalistas' && <CredencialesFinalistas />}
-          {seccion === 'mi-credencial' && <MiCredencial resumen={resumen} />}
+          {seccion === 'mi-credencial' && <MiCredencial resumen={resumen} final={final} />}
           {seccion === 'examen' && examen?.habilitado && <RespuestasExamen />}
           {seccion === 'clasificacion' && clasificado && <MiClasificacion />}
           {seccion === 'historial' && <MisInscripciones />}
@@ -627,12 +649,16 @@ function RespuestaObservacion({ resumen, alCambiar, alVolver, alTerminar }) {
  * necesita para entrar a la sede igual que sus alumnos. Sale en el mismo
  * formato que la de ellos, de la etapa que la comisión tenga publicada.
  */
-function MiCredencial({ resumen }) {
+function MiCredencial({ resumen, final }) {
   const [etapas, setEtapas] = useState(null);
   const [etapa, setEtapa] = useState('');
   const [bajando, setBajando] = useState(false);
   const [error, setError] = useState('');
   const habilitado = resumen.estado === 'APROBADA';
+  const [bajandoFinal, setBajandoFinal] = useState(false);
+  // Con la final abierta y gente suya dentro, la suya de finalista es la que
+  // vale: va con la misma tarjeta que la de sus alumnos.
+  const enFinal = Boolean(final?.abierta && final.finalistas?.length);
 
   useEffect(() => {
     if (!habilitado) return;
@@ -674,10 +700,45 @@ function MiCredencial({ resumen }) {
     }
   };
 
+  const bajarFinal = async () => {
+    setError('');
+    setBajandoFinal(true);
+    try {
+      await descargar('/final/mi-credencial', 'mi-credencial-finalista.pdf');
+    } catch {
+      setError('No se pudo generar su credencial de finalista');
+    } finally {
+      setBajandoFinal(false);
+    }
+  };
+
   return (
+    <div className="space-y-6">
+      {enFinal && (
+        <Tarjeta fondo="bg-granate-50">
+          <Medal className="h-14 w-14 text-granate-600" />
+          <h3 className="mt-6 text-3xl font-black text-slate-900">
+            Mi credencial de la final
+          </h3>
+          <p className="mt-3 text-xl text-slate-700">
+            La suya como tutor responsable de {resumen.institucion}, con el mismo diseño que la
+            de sus finalistas: dice TUTOR, los salones donde está su gente y el turno al que
+            tiene que estar. Tarjeta de 9 × 6 cm.
+          </p>
+          <div className="mt-8">
+            <Boton cargando={bajandoFinal} onClick={bajarFinal}>
+              <Download className="h-6 w-6" />
+              Descargar mi credencial de finalista
+            </Boton>
+          </div>
+        </Tarjeta>
+      )}
+
     <Tarjeta>
       <BadgeCheck className="h-14 w-14 text-granate-600" />
-      <h3 className="mt-6 text-3xl font-black text-slate-900">Mi credencial</h3>
+      <h3 className="mt-6 text-3xl font-black text-slate-900">
+        {enFinal ? 'Mi credencial institucional' : 'Mi credencial'}
+      </h3>
       <p className="mt-3 text-xl text-slate-600">
         La suya, como tutor responsable de {resumen.institucion}. Preséntela el día del examen
         junto con su DNI.
@@ -716,7 +777,12 @@ function MiCredencial({ resumen }) {
           )}
 
           <div className="mt-8">
-            <Boton tamano="grande" cargando={bajando} onClick={bajar}>
+            <Boton
+              variante={enFinal ? 'contorno' : 'primario'}
+              tamano="grande"
+              cargando={bajando}
+              onClick={bajar}
+            >
               <Download className="h-7 w-7" />
               Descargar mi credencial
             </Boton>
@@ -724,6 +790,7 @@ function MiCredencial({ resumen }) {
         </>
       )}
     </Tarjeta>
+    </div>
   );
 }
 

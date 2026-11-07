@@ -18,7 +18,7 @@ export class PermisosController {
 
   @UseGuards(JwtAuthGuard, RolesGuard, PermisoGuard)
   @Roles('ADMIN', 'SUPERVISOR')
-  @Permiso('supervisores-permisos')
+  @Permiso('supervisores-permisos', 'supervisores-final')
   @Get('supervisores')
   supervisores() {
     return this.permisos.supervisores();
@@ -26,7 +26,7 @@ export class PermisosController {
 
   @UseGuards(JwtAuthGuard, RolesGuard, PermisoGuard)
   @Roles('ADMIN', 'SUPERVISOR')
-  @Permiso('supervisores-permisos')
+  @Permiso('supervisores-permisos', 'supervisores-final')
   @Post('supervisores/:id')
   guardar(
     @Param('id') id: string,

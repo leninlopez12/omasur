@@ -1,13 +1,17 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { LogOut, Menu, X } from 'lucide-react';
+import { ChevronDown, ChevronRight, LogOut, Menu, X } from 'lucide-react';
 import { useAuth } from '../lib/auth.jsx';
 import Logo from '../components/Logo.jsx';
 
 /**
  * `compacto` reduce la escala del panel: lo usan los paneles de la comisión,
  * que muestran mucha información. El panel del tutor se queda con letra grande.
- * Una sección puede traer `hijos` y estos aparecen dentro del mismo sidebar.
+ *
+ * Una sección puede traer `hijos`, y un hijo los suyos: la final macrorregional
+ * y la clasificatoria institucional son etapas que llevan secciones dentro, y
+ * esas secciones llevan pantallas. Por eso el menú se dibuja solo, nivel por
+ * nivel, en vez de dar por hecho que hay dos.
  */
 export default function PanelLayout({
   titulo,
@@ -30,7 +34,9 @@ export default function PanelLayout({
         item: 'gap-3 rounded-xl px-4 py-2.5 text-base',
         icono: 'h-5 w-5',
         hijo: 'gap-3 rounded-xl py-2 pl-11 pr-4 text-base',
+        nieto: 'gap-3 rounded-xl py-2 pl-[3.5rem] pr-3 text-base',
         iconoHijo: 'h-4 w-4',
+        chevron: 'h-4 w-4',
         marca: 'text-base',
         titulo: 'text-2xl',
         usuario: 'text-base',
@@ -43,7 +49,9 @@ export default function PanelLayout({
         item: 'gap-4 rounded-2xl px-5 py-4 text-xl',
         icono: 'h-7 w-7',
         hijo: 'gap-4 rounded-2xl py-3 pl-14 pr-5 text-xl',
+        nieto: 'gap-4 rounded-2xl py-3 pl-[4.5rem] pr-4 text-xl',
         iconoHijo: 'h-6 w-6',
+        chevron: 'h-5 w-5',
         marca: 'text-xl',
         titulo: 'text-3xl',
         usuario: 'text-xl',
@@ -57,6 +65,67 @@ export default function PanelLayout({
     setAbierto(false);
   };
 
+  /** La primera pantalla que se puede abrir dentro de una rama. */
+  const primeraPantalla = (seccion) =>
+    seccion.hijos?.length ? primeraPantalla(seccion.hijos[0]) : seccion.id;
+
+  /** Si lo que está abierto cuelga de esta rama; así se despliega sola. */
+  const contiene = (seccion) => seccion.id === actual || Boolean(seccion.hijos?.some(contiene));
+
+  const sangria = [t.item, t.hijo, t.nieto];
+  const tamanoIcono = [t.icono, t.iconoHijo, t.iconoHijo];
+
+  /**
+   * Una entrada del menú con lo que lleve dentro.
+   *
+   * El nivel solo cambia la sangría y el peso de la letra: lo demás es igual sea
+   * una etapa, una sección o una pantalla. Al pulsar un grupo se abre su primera
+   * pantalla, que es como venía funcionando el menú.
+   */
+  const pintar = (seccion, nivel) => {
+    const { id, texto, icono: Icono, hijos, destacado } = seccion;
+    const grupo = Boolean(hijos?.length);
+    const dentro = contiene(seccion);
+
+    const colores = dentro
+      ? nivel === 0
+        ? 'bg-white text-granate-700 shadow-suave'
+        : grupo
+          ? // Una sección abierta dentro de su etapa: se marca, pero más suave
+            // que la pantalla que se está viendo.
+            'bg-granate-700 text-white'
+          : 'bg-granate-600 text-white'
+      : destacado === 'verde'
+        ? // Lo bueno también merece saltar a la vista.
+          'bg-emerald-600 text-white hover:bg-emerald-500'
+        : destacado
+          ? // Lo urgente no se pierde entre lo de siempre.
+            'bg-amber-500 text-white hover:bg-amber-400'
+          : 'text-granate-100 hover:bg-granate-700';
+
+    return (
+      <div key={id} className="space-y-1.5">
+        <button
+          onClick={() => elegir(primeraPantalla(seccion))}
+          className={`flex w-full items-center text-left transition ${
+            nivel === 0 ? 'font-semibold' : 'font-medium'
+          } ${sangria[nivel]} ${colores}`}
+        >
+          <Icono className={`${tamanoIcono[nivel]} shrink-0`} />
+          <span className="min-w-0 flex-1">{texto}</span>
+          {grupo &&
+            (dentro ? (
+              <ChevronDown className={`${t.chevron} shrink-0 opacity-60`} />
+            ) : (
+              <ChevronRight className={`${t.chevron} shrink-0 opacity-60`} />
+            ))}
+        </button>
+
+        {dentro && grupo && hijos.map((hijo) => pintar(hijo, nivel + 1))}
+      </div>
+    );
+  };
+
   const menu = (
     <nav className="flex h-full flex-col">
       <Link to="/" className={`flex items-center gap-3 ${compacto ? 'px-5 py-5' : 'px-6 py-7'}`}>
@@ -65,49 +134,7 @@ export default function PanelLayout({
       </Link>
 
       <div className="flex-1 space-y-1.5 px-4 py-4">
-        {secciones.map((seccion) => {
-          const { id, texto, icono: Icono, hijos, destacado } = seccion;
-          const activoHijo = hijos?.some((h) => h.id === actual);
-          const activo = actual === id || activoHijo;
-
-          return (
-            <div key={id} className="space-y-1.5">
-              <button
-                onClick={() => elegir(hijos?.length ? hijos[0].id : id)}
-                className={`flex w-full items-center text-left font-semibold transition ${t.item} ${
-                  activo
-                    ? 'bg-white text-granate-700 shadow-suave'
-                    : destacado === 'verde'
-                      ? // Lo bueno también merece saltar a la vista.
-                        'bg-emerald-600 text-white hover:bg-emerald-500'
-                      : destacado
-                        ? // Lo urgente no se pierde entre lo de siempre.
-                          'bg-amber-500 text-white hover:bg-amber-400'
-                      : 'text-granate-100 hover:bg-granate-700'
-                }`}
-              >
-                <Icono className={`${t.icono} shrink-0`} />
-                {texto}
-              </button>
-
-              {activo &&
-                hijos?.map(({ id: idHijo, texto: textoHijo, icono: IconoHijo }) => (
-                  <button
-                    key={idHijo}
-                    onClick={() => elegir(idHijo)}
-                    className={`flex w-full items-center text-left font-medium transition ${t.hijo} ${
-                      actual === idHijo
-                        ? 'bg-granate-600 text-white'
-                        : 'text-granate-100 hover:bg-granate-700'
-                    }`}
-                  >
-                    <IconoHijo className={`${t.iconoHijo} shrink-0`} />
-                    {textoHijo}
-                  </button>
-                ))}
-            </div>
-          );
-        })}
+        {secciones.map((seccion) => pintar(seccion, 0))}
       </div>
 
       <div className="space-y-1.5 border-t border-granate-700 px-4 py-5">

@@ -321,25 +321,29 @@ export class AdminController {
     );
   }
 
-  @Roles('ADMIN')
+  @Roles('ADMIN', 'SUPERVISOR')
+  @Permiso('supervisores-cuentas')
   @Get('supervisores')
   listarSupervisores() {
     return this.supervisores.listar();
   }
 
-  @Roles('ADMIN')
+  @Roles('ADMIN', 'SUPERVISOR')
+  @Permiso('supervisores-cuentas')
   @Post('supervisores')
   crearSupervisor(@Body() body: { nombre?: string; correo?: string; dni?: string }) {
     return this.supervisores.crear(body || {});
   }
 
-  @Roles('ADMIN')
+  @Roles('ADMIN', 'SUPERVISOR')
+  @Permiso('supervisores-cuentas')
   @Post('supervisores/:id/clave')
   regenerarClave(@Param('id') id: string) {
     return this.supervisores.regenerarClave(id);
   }
 
-  @Roles('ADMIN')
+  @Roles('ADMIN', 'SUPERVISOR')
+  @Permiso('supervisores-cuentas')
   @Delete('supervisores/:id')
   eliminarSupervisor(@Param('id') id: string, @CurrentUser() usuario: JwtUser) {
     return this.supervisores.eliminar(id, usuario.sub);
