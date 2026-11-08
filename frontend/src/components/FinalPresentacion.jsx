@@ -2,18 +2,24 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import {
   AlertCircle,
   Building2,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ClipboardList,
   Crown,
   FastForward,
   Keyboard,
   Landmark,
+  Layers,
   Maximize2,
+  Medal,
   Minimize2,
   MonitorPlay,
   Play,
   RotateCcw,
+  School,
   Sparkles,
+  Trophy,
   Users,
 } from 'lucide-react';
 import { Aviso, Boton, Cargando, Selector, Tarjeta } from './Ui.jsx';
@@ -56,6 +62,13 @@ const velocidadGuardada = () => {
  * proyector, sin sorpresas de última hora.
  */
 export default function FinalPresentacion({ lamina: pedida, irA }) {
+  // El sustento del premio mayor no se proyecta: es una pantalla del panel,
+  // sale de otra consulta y no necesita las veintiuna láminas del acto.
+  if (pedida === 'campeones-sustento') return <Sustento />;
+  return <Proyeccion pedida={pedida} irA={irA} />;
+}
+
+function Proyeccion({ pedida, irA }) {
   const [datos, setDatos] = useState(null);
   const [error, setError] = useState('');
 
@@ -114,8 +127,9 @@ function Tablero({ datos, irA }) {
             </h3>
             <p className="mt-2 text-xl text-slate-600">
               La premiación se proyecta en {laminas.length} láminas, del décimo lugar al primero
-              y en cada lugar primero el privado y después el público. Cada una se abre desde el
-              menú, o desde el orden del acto que está más abajo.
+              y en cada lugar primero el privado y después el público. La última es el premio
+              mayor: campeones de campeones. Cada una se abre desde el menú, o desde el orden del
+              acto que está más abajo.
             </p>
           </div>
           <Boton onClick={() => abrir(0)}>
@@ -240,7 +254,7 @@ function Indice({ laminas, indice, ir }) {
     <Tarjeta className="p-6">
       <h4 className="text-xl font-black text-slate-900">Orden del acto</h4>
       <p className="mt-1 text-base text-slate-600">
-        Del décimo lugar al primero. Toque cualquiera para abrirla.
+        Del décimo lugar al primero, y al final el premio mayor. Toque cualquiera para abrirla.
       </p>
 
       <div className="mt-5 grid gap-2 sm:grid-cols-2">
@@ -580,14 +594,23 @@ function Resplandores() {
 /** Las columnas de la tabla, en un solo sitio: cabecera y filas no pueden bailar. */
 const COLUMNAS = 'grid-cols-[15rem_minmax(0,1fr)_minmax(0,0.78fr)_9rem]';
 
+/**
+ * Y las del premio mayor, que premia a la delegación y no al alumno: lugar,
+ * quién la lleva, de qué colegio, de qué modalidad y con cuántos puntos.
+ */
+const COLUMNAS_CAMPEONES = 'grid-cols-[16rem_minmax(0,1fr)_minmax(0,0.92fr)_14rem_9rem]';
+
 function Lamina({ lamina, mostradas }) {
-  const primero = lamina.puesto === 1;
+  const campeonato = lamina.tipo === 'campeones';
+  const primero = lamina.puesto === 1 && !campeonato;
 
   // La tabla es una lista plana: en el estrado se nombra premiado por
   // premiado, no categoría por categoría, y un empate son dos renglones.
-  const filas = lamina.categorias.flatMap((c) =>
-    c.alumnos.map((a) => ({ ...a, categoria: c.categoria, grado: c.grado })),
-  );
+  const filas = campeonato
+    ? lamina.campeones || []
+    : lamina.categorias.flatMap((c) =>
+        c.alumnos.map((a) => ({ ...a, categoria: c.categoria, grado: c.grado })),
+      );
 
   return (
     <div
@@ -596,23 +619,41 @@ function Lamina({ lamina, mostradas }) {
     >
       <header className="text-center" style={{ transform: 'translateZ(70px)' }}>
         <div className="flex items-center justify-center gap-4">
-          <span className="inline-flex items-center rounded-full bg-white/75 px-10 py-3 text-[2.1rem] font-black uppercase tracking-[0.3em] text-granate-700 shadow-suave backdrop-blur">
-            {lamina.ambitoTexto}
-          </span>
-          {primero && (
-            <span className="inline-flex items-center gap-3 rounded-full bg-amber-400/90 px-8 py-3 text-[2.1rem] font-black uppercase tracking-[0.3em] text-amber-950 shadow-suave">
-              <Crown className="h-9 w-9" />
-              Campeones
+          {campeonato ? (
+            <span className="inline-flex items-center gap-4 rounded-full bg-amber-400/90 px-10 py-3 text-[2.1rem] font-black uppercase tracking-[0.3em] text-amber-950 shadow-suave">
+              <Crown className="h-10 w-10" />
+              {lamina.ambitoTexto}
             </span>
+          ) : (
+            <>
+              <span className="inline-flex items-center rounded-full bg-white/75 px-10 py-3 text-[2.1rem] font-black uppercase tracking-[0.3em] text-granate-700 shadow-suave backdrop-blur">
+                {lamina.ambitoTexto}
+              </span>
+              {primero && (
+                <span className="inline-flex items-center gap-3 rounded-full bg-amber-400/90 px-8 py-3 text-[2.1rem] font-black uppercase tracking-[0.3em] text-amber-950 shadow-suave">
+                  <Crown className="h-9 w-9" />
+                  Campeones
+                </span>
+              )}
+            </>
           )}
         </div>
 
-        <h1 className="mt-5 text-[5.4rem] font-black leading-[0.95] tracking-tight text-granate-700 drop-shadow-sm">
+        <h1
+          className={`mt-5 font-black leading-[0.95] tracking-tight text-granate-700 drop-shadow-sm ${
+            campeonato ? 'text-[4.8rem]' : 'text-[5.4rem]'
+          }`}
+        >
           {lamina.titulo}
         </h1>
         <p className="mt-2 text-3xl font-bold uppercase tracking-[0.3em] text-granate-500">
           {lamina.subtitulo}
         </p>
+        {campeonato && (
+          <p className="mx-auto mt-4 max-w-5xl text-2xl font-medium text-granate-600">
+            {lamina.detalle}
+          </p>
+        )}
       </header>
 
       {filas.length === 0 ? (
@@ -621,28 +662,105 @@ function Lamina({ lamina, mostradas }) {
             className="rounded-3xl bg-white/70 px-14 py-10 text-4xl font-semibold text-granate-700 shadow-suave backdrop-blur"
             style={{ transform: 'translateZ(50px)' }}
           >
-            Este lugar todavía no tiene a nadie.
+            {campeonato
+              ? 'Todavía no hay delegaciones con puntos.'
+              : 'Este lugar todavía no tiene a nadie.'}
           </p>
         </div>
       ) : (
         <div className="mt-9 flex-1" style={{ transformStyle: 'preserve-3d' }}>
           <div
-            className={`grid ${COLUMNAS} items-end gap-7 px-9 pb-3 text-xl font-bold uppercase tracking-[0.2em] text-granate-500`}
+            className={`grid ${campeonato ? COLUMNAS_CAMPEONES : COLUMNAS} items-end gap-7 px-9 pb-3 text-xl font-bold uppercase tracking-[0.2em] text-granate-500`}
             style={{ transform: 'translateZ(40px)' }}
           >
-            <span>Categoría</span>
-            <span>Estudiante</span>
-            <span>Institución educativa</span>
-            <span className="text-right">Puntaje</span>
+            {campeonato ? (
+              <>
+                <span>Lugar</span>
+                <span>Tutor de la delegación</span>
+                <span>Institución educativa</span>
+                <span>Modalidad</span>
+                <span className="text-right">Puntos</span>
+              </>
+            ) : (
+              <>
+                <span>Categoría</span>
+                <span>Estudiante</span>
+                <span>Institución educativa</span>
+                <span className="text-right">Puntaje</span>
+              </>
+            )}
           </div>
 
           <div className="space-y-3" style={{ transformStyle: 'preserve-3d' }}>
-            {filas.map((f, i) => (
-              <Fila key={`${f.categoria}-${f.dni}`} fila={f} visible={i < mostradas} />
-            ))}
+            {filas.map((f, i) =>
+              campeonato ? (
+                <FilaCampeon key={f.puesto} campeon={f} visible={i < mostradas} />
+              ) : (
+                <Fila key={`${f.categoria}-${f.dni}`} fila={f} visible={i < mostradas} />
+              ),
+            )}
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/** El metal de cada lugar del campeonato, para que se reconozca de lejos. */
+const METAL = {
+  1: 'bg-gradient-to-br from-amber-300 to-amber-500 text-amber-950',
+  2: 'bg-gradient-to-br from-slate-200 to-slate-400 text-slate-800',
+  3: 'bg-gradient-to-br from-orange-300 to-orange-500 text-orange-950',
+};
+
+/**
+ * Una delegación campeona: su lugar, su tutor, su colegio y su modalidad.
+ *
+ * El nombre del tutor va grande y el del colegio debajo en la misma fila
+ * porque el premio es de los dos, pero al estrado sube una persona y es a
+ * quien se llama por el micrófono.
+ */
+function FilaCampeon({ campeon, visible }) {
+  return (
+    <div
+      className={`grid ${COLUMNAS_CAMPEONES} items-center gap-7 rounded-[1.75rem] border border-white/80 bg-white/75 px-9 py-6 shadow-suave backdrop-blur ${
+        visible ? 'animate-entrarFila' : 'opacity-0'
+      }`}
+    >
+      <div className="flex items-center gap-4">
+        <span
+          className={`flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl text-3xl font-black shadow-suave ${
+            METAL[campeon.puesto] || 'bg-granate-600 text-white'
+          }`}
+        >
+          {campeon.puesto}
+        </span>
+        <span className="text-xl font-bold uppercase leading-tight tracking-widest text-granate-600">
+          {campeon.ordinal}
+        </span>
+      </div>
+
+      <p className="text-[2rem] font-black uppercase leading-[1.05] text-slate-900">
+        {campeon.tutor}
+        {campeon.empatado && (
+          <span className="ml-4 align-middle text-xl font-bold uppercase tracking-widest text-amber-600">
+            empate
+          </span>
+        )}
+      </p>
+
+      <p className="text-xl font-semibold leading-tight text-slate-700">{campeon.institucion}</p>
+
+      <p className="text-xl font-bold uppercase leading-tight tracking-wide text-granate-600">
+        {campeon.modalidadTexto}
+      </p>
+
+      <p className="text-right text-[2rem] font-black leading-none text-granate-600">
+        {campeon.puntos}
+        <span className="ml-2 text-lg font-bold uppercase tracking-widest text-granate-400">
+          pts
+        </span>
+      </p>
     </div>
   );
 }
@@ -877,6 +995,349 @@ function Mando({ indice, total, lamina, pantalla, estado, ir, reproducir, altern
         </BotonRedondo>
       </div>
     </div>
+  );
+}
+
+// ----------------------------------------------- el sustento del premio mayor
+
+/**
+ * Por qué son campeones de campeones.
+ *
+ * La lámina del acto dice quiénes son y se pasa en veinte segundos; esto es
+ * lo que hay que tener abierto cuando un tutor venga a preguntar por qué no
+ * fue él: la escala, la tabla entera y, delegación por delegación, qué alumno
+ * sumó cuánto. Nada está guardado, así que corregir una clave lo arrastra.
+ */
+function Sustento() {
+  const [datos, setDatos] = useState(null);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    api
+      .get('/final/resultados/campeones')
+      .then(({ data }) => setDatos(data))
+      .catch((e) => setError(mensajeError(e, 'No se pudo armar el campeonato')));
+  }, []);
+
+  if (error && !datos) {
+    return (
+      <Aviso tipo="error" icono={AlertCircle}>
+        {error}
+      </Aviso>
+    );
+  }
+  if (!datos) return <Cargando texto="Sumando los puntos de cada delegación" />;
+
+  const { resumen } = datos;
+
+  return (
+    <div className="space-y-6">
+      <Tarjeta>
+        <h3 className="flex items-center gap-3 text-3xl font-black text-slate-900">
+          <Crown className="h-9 w-9 text-amber-500" />
+          Campeones de campeones
+        </h3>
+        <p className="mt-2 max-w-4xl text-xl text-slate-600">
+          El premio mayor no es de un alumno sino de la delegación: suma cada uno de sus
+          estudiantes que entró entre los {datos.puestosQueSuman} primeros de su categoría. Por eso
+          lo gana quien reparte premiados en muchas categorías y no quien trajo una sola estrella.
+        </p>
+
+        <div className="mt-7 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <Cifra icono={School} valor={resumen.delegaciones} texto="Delegaciones en la final" />
+          <Cifra icono={Trophy} valor={resumen.conPuntos} texto="Con alguien entre los diez" />
+          <Cifra icono={Layers} valor={resumen.categorias} texto="Categorías con alumnos" />
+          <Cifra icono={Users} valor={resumen.rindieron} texto="Rindieron la final" />
+        </div>
+
+        {resumen.salonesPendientes > 0 && (
+          <div className="mt-6">
+            <Aviso tipo="alerta" icono={AlertCircle} compacto titulo="Todavía faltan actas">
+              Quedan {resumen.salonesPendientes} salón(es) por entregar. Un puesto que se mueva
+              cambia los puntos, así que esto no es definitivo hasta que lleguen todas.
+            </Aviso>
+          </div>
+        )}
+      </Tarjeta>
+
+      <ComoSeGana escala={datos.escala} puestos={datos.puestosQueSuman} />
+
+      {datos.podio.length > 0 && (
+        <div className="grid gap-6 lg:grid-cols-3">
+          {datos.podio.map((c) => (
+            <TarjetaCampeon key={c.tutorId} campeon={c} />
+          ))}
+        </div>
+      )}
+
+      <TablaCampeonato tabla={datos.tabla} />
+    </div>
+  );
+}
+
+/** La escala de puntos y el criterio, escritos para poder leerlos en voz alta. */
+function ComoSeGana({ escala, puestos }) {
+  return (
+    <div className="grid gap-6 lg:grid-cols-2">
+      <Tarjeta className="p-6">
+        <h4 className="flex items-center gap-3 text-xl font-black text-slate-900">
+          <Medal className="h-6 w-6 text-granate-600" />
+          Lo que vale cada puesto
+        </h4>
+        <p className="mt-1 text-base text-slate-600">
+          Por cada alumno que quedó entre los {puestos} primeros de su categoría. Más abajo del
+          décimo no suma nada.
+        </p>
+        <ul className="mt-5 space-y-2">
+          {escala.map((e) => (
+            <li
+              key={e.texto}
+              className="flex items-center justify-between gap-4 rounded-xl bg-slate-50 px-4 py-3"
+            >
+              <span className="text-base font-bold text-slate-800">{e.texto}</span>
+              <span className="text-xl font-black text-granate-600">
+                {e.puntos}
+                <span className="ml-1 text-sm font-bold uppercase tracking-widest text-granate-400">
+                  pts
+                </span>
+              </span>
+            </li>
+          ))}
+        </ul>
+      </Tarjeta>
+
+      <Tarjeta className="p-6">
+        <h4 className="flex items-center gap-3 text-xl font-black text-slate-900">
+          <ClipboardList className="h-6 w-6 text-granate-600" />
+          Cómo se desempata
+        </h4>
+        <p className="mt-1 text-base text-slate-600">
+          En este orden, y nada más. Si dos delegaciones coinciden en los cinco, comparten el
+          lugar: el día del acto no se inventa un desempate que nadie acordó.
+        </p>
+        <ol className="mt-5 space-y-2">
+          {[
+            'Los puntos sumados',
+            'En cuántas categorías distintas puntuó',
+            'Cuántos primeros puestos trajo',
+            'Cuántos segundos',
+            'Cuántos terceros',
+          ].map((texto, i) => (
+            <li key={texto} className="flex items-center gap-4 rounded-xl bg-slate-50 px-4 py-3">
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-granate-600 text-base font-black text-white">
+                {i + 1}
+              </span>
+              <span className="text-base font-semibold text-slate-700">{texto}</span>
+            </li>
+          ))}
+        </ol>
+      </Tarjeta>
+    </div>
+  );
+}
+
+const BORDE_METAL = {
+  1: 'border-amber-300 bg-amber-50',
+  2: 'border-slate-300 bg-slate-50',
+  3: 'border-orange-300 bg-orange-50',
+};
+
+/** Uno de los tres campeones, con el detalle de dónde salieron sus puntos. */
+function TarjetaCampeon({ campeon }) {
+  return (
+    <div
+      className={`rounded-3xl border-2 p-6 shadow-suave ${
+        BORDE_METAL[campeon.puesto] || 'border-slate-200 bg-white'
+      }`}
+    >
+      <div className="flex items-center gap-3">
+        <span
+          className={`flex h-12 w-12 items-center justify-center rounded-2xl text-2xl font-black ${
+            METAL[campeon.puesto] || 'bg-granate-600 text-white'
+          }`}
+        >
+          {campeon.puesto}
+        </span>
+        <div className="min-w-0">
+          <p className="text-base font-bold uppercase tracking-widest text-granate-600">
+            {campeon.puesto === 1 ? 'Campeón de campeones' : `${campeon.puesto}° lugar`}
+          </p>
+          <p className="text-base text-slate-500">{campeon.modalidadTexto}</p>
+        </div>
+      </div>
+
+      <p className="mt-4 text-2xl font-black uppercase leading-tight text-slate-900">
+        {campeon.tutor || 'Sin tutor registrado'}
+      </p>
+      <p className="text-lg font-semibold leading-tight text-slate-600">{campeon.institucion}</p>
+
+      <div className="mt-5 grid grid-cols-3 gap-2">
+        <Dato valor={campeon.puntos} texto="Puntos" />
+        <Dato valor={campeon.categorias} texto="Categorías" />
+        <Dato valor={campeon.premiados} texto="Premiados" />
+      </div>
+
+      <ul className="mt-5 space-y-1.5">
+        {campeon.alumnos.map((a) => (
+          <li
+            key={`${a.categoria}-${a.dni}`}
+            className="flex items-center gap-3 rounded-xl bg-white/80 px-3 py-2"
+          >
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-granate-600 text-base font-black text-white">
+              {a.categoria}
+            </span>
+            <span className="min-w-0 flex-1 truncate text-base font-semibold uppercase text-slate-800">
+              {a.nombres}
+            </span>
+            <span className="shrink-0 text-base text-slate-500">{a.puesto}°</span>
+            <span className="shrink-0 text-base font-black text-granate-600">+{a.puntos}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function Dato({ valor, texto }) {
+  return (
+    <div className="rounded-xl bg-white/80 p-2 text-center">
+      <p className="text-2xl font-black text-slate-900">{valor}</p>
+      <p className="text-sm font-semibold uppercase tracking-wide text-slate-500">{texto}</p>
+    </div>
+  );
+}
+
+/**
+ * El campeonato completo, con el sustento de cada delegación a un toque.
+ *
+ * Están todas las que sumaron algo, no solo las tres premiadas: la pregunta
+ * que se repite después del acto es «¿y nosotros en qué quedamos?».
+ */
+function TablaCampeonato({ tabla }) {
+  const [abierta, setAbierta] = useState(null);
+
+  if (tabla.length === 0) {
+    return (
+      <Tarjeta className="p-6">
+        <p className="text-base text-slate-500">
+          Todavía ninguna delegación tiene alumnos entre los diez primeros de su categoría.
+        </p>
+      </Tarjeta>
+    );
+  }
+
+  return (
+    <Tarjeta className="p-6">
+      <h4 className="flex items-center gap-3 text-2xl font-black text-slate-900">
+        <Trophy className="h-7 w-7 text-granate-600" />
+        El campeonato completo
+      </h4>
+      <p className="mt-1 text-base text-slate-600">
+        Todas las delegaciones que sumaron puntos. Toque una para ver qué alumno le dio cada
+        punto.
+      </p>
+
+      <div className="mt-5 overflow-x-auto">
+        <table className="w-full min-w-[56rem] border-collapse text-left">
+          <thead>
+            <tr className="border-b-2 border-slate-200">
+              {['#', 'Tutor de la delegación', 'Institución educativa', 'Modalidad', 'Cat.', 'Premiados', 'Puntos'].map(
+                (t) => (
+                  <th
+                    key={t}
+                    className="pb-2 pr-4 text-base font-bold uppercase tracking-widest text-granate-500"
+                  >
+                    {t}
+                  </th>
+                ),
+              )}
+            </tr>
+          </thead>
+          <tbody>
+            {tabla.map((d) => {
+              const desplegada = abierta === d.tutorId;
+              return [
+                <tr
+                  key={d.tutorId}
+                  onClick={() => setAbierta(desplegada ? null : d.tutorId)}
+                  className="cursor-pointer border-b border-slate-100 hover:bg-granate-50"
+                >
+                  <td className="py-3 pr-4">
+                    <span
+                      className={`inline-flex h-11 w-11 flex-col items-center justify-center rounded-xl text-base font-black ${
+                        METAL[d.puesto] || 'bg-granate-50 text-granate-800'
+                      }`}
+                      title={d.empatado ? 'Comparte el lugar' : undefined}
+                    >
+                      {d.puesto}
+                      {d.empatado && (
+                        <span className="text-[0.6rem] font-bold uppercase">emp.</span>
+                      )}
+                    </span>
+                  </td>
+                  <td className="py-3 pr-4 text-lg font-bold uppercase text-slate-900">
+                    {d.tutor || 'Sin tutor registrado'}
+                  </td>
+                  <td className="py-3 pr-4 text-base text-slate-600">{d.institucion}</td>
+                  <td className="py-3 pr-4 text-base font-semibold text-slate-700">
+                    {d.modalidadTexto}
+                  </td>
+                  <td className="py-3 pr-4 text-base font-semibold text-slate-700">
+                    {d.categorias}
+                  </td>
+                  <td className="py-3 pr-4 text-base text-slate-600">
+                    {d.premiados} de {d.rindieron}
+                  </td>
+                  <td className="py-3 pr-4">
+                    <span className="inline-flex items-center gap-2 text-xl font-black text-granate-600">
+                      {d.puntos}
+                      <ChevronDown
+                        className={`h-5 w-5 text-slate-400 transition ${
+                          desplegada ? 'rotate-180' : ''
+                        }`}
+                      />
+                    </span>
+                  </td>
+                </tr>,
+                desplegada && (
+                  <tr key={`${d.tutorId}-detalle`} className="border-b border-slate-100">
+                    <td colSpan={7} className="bg-slate-50 px-4 py-4">
+                      <p className="text-base font-bold uppercase tracking-widest text-granate-500">
+                        De dónde salen sus {d.puntos} puntos
+                      </p>
+                      <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+                        {d.alumnos.map((a) => (
+                          <div
+                            key={`${a.categoria}-${a.dni}`}
+                            className="flex items-center gap-3 rounded-xl bg-white px-3 py-2 shadow-suave"
+                          >
+                            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-granate-600 text-base font-black text-white">
+                              {a.categoria}
+                            </span>
+                            <div className="min-w-0 flex-1">
+                              <p className="truncate text-base font-bold uppercase text-slate-800">
+                                {a.nombres}
+                              </p>
+                              <p className="text-sm text-slate-500">
+                                {a.grado} · {a.puesto}° puesto · {a.puntaje} de puntaje
+                                {a.empatado ? ' · empate' : ''}
+                              </p>
+                            </div>
+                            <span className="shrink-0 text-lg font-black text-granate-600">
+                              +{a.puntos}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </td>
+                  </tr>
+                ),
+              ];
+            })}
+          </tbody>
+        </table>
+      </div>
+    </Tarjeta>
   );
 }
 

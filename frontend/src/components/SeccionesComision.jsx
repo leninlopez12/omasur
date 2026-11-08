@@ -6,6 +6,7 @@ import {
   CalendarCheck,
   ClipboardCheck,
   ClipboardList,
+  Crown,
   DoorOpen,
   FileSpreadsheet,
   FileText,
@@ -334,6 +335,19 @@ export const SECCION_PRESENTACION_FINAL = {
         icono: a.icono,
       })),
     })),
+    {
+      id: 'final-pres-campeones',
+      texto: 'Campeones de campeones',
+      icono: Crown,
+      hijos: [
+        { id: 'final-pres-campeones-podio', texto: 'Premiación', icono: Trophy },
+        {
+          id: 'final-pres-campeones-sustento',
+          texto: 'Por qué son campeones',
+          icono: ClipboardList,
+        },
+      ],
+    },
   ],
 };
 
@@ -451,6 +465,8 @@ export const TITULOS_COMISION = {
       ]),
     ),
   ),
+  'final-pres-campeones-podio': 'Presentación · Campeones de campeones',
+  'final-pres-campeones-sustento': 'Presentación · Por qué son campeones de campeones',
   'examen-respuestas': 'Examen · Respuestas correctas',
   'examen-puntaje': 'Examen · Puntaje',
   'examen-prueba': 'Examen · Probar el envío',

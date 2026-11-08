@@ -7,6 +7,7 @@ import NuevaClave from './pages/NuevaClave.jsx';
 import Credencial from './pages/Credencial.jsx';
 import CredencialFinal from './pages/CredencialFinal.jsx';
 import ResultadosEtapa from './pages/ResultadosEtapa.jsx';
+import ResultadosFinal from './pages/ResultadosFinal.jsx';
 import PanelTutor from './pages/PanelTutor.jsx';
 import PanelAdmin from './pages/PanelAdmin.jsx';
 import PanelSupervisor from './pages/PanelSupervisor.jsx';
@@ -32,6 +33,7 @@ export default function App() {
       <Route path="/credencial" element={<Credencial />} />
       <Route path="/credencial-finalista" element={<CredencialFinal />} />
       <Route path="/resultados_etapa_institucional" element={<ResultadosEtapa />} />
+      <Route path="/resultados_final_macrorregional" element={<ResultadosFinal />} />
       <Route
         path="/panel/*"
         element={

@@ -79,6 +79,7 @@ export default function Landing() {
   const grupos = ajustes.grupos;
   const cerradas = ajustes.inscripcionesCerradas;
   const [resultados, setResultados] = useState(null);
+  const [resultadosFinal, setResultadosFinal] = useState(null);
 
   const [credencial, setCredencial] = useState(null);
   const [finalista, setFinalista] = useState(null);
@@ -88,6 +89,14 @@ export default function Landing() {
       .get('/resultados/publico')
       .then(({ data }) => setResultados(data))
       .catch(() => setResultados(null));
+
+    // La de la final espera a que cierre la institucional: el servidor ya
+    // devuelve `activa` en falso mientras la otra siga abierta, así que aquí
+    // no hay que decidir nada.
+    api
+      .get('/final/publico')
+      .then(({ data }) => setResultadosFinal(data))
+      .catch(() => setResultadosFinal(null));
 
     api
       .get('/credenciales/publica')
@@ -140,6 +149,19 @@ export default function Landing() {
               <Link to="/resultados_etapa_institucional">
                 <Boton variante="rojo" tamano="grande" className="animate-latido font-black">
                   {resultados.titulo}
+                </Boton>
+              </Link>
+            </div>
+          )}
+
+          {/* La de la final toma el relevo cuando la institucional cierra:
+              nunca están las dos, para que nadie entre a la consulta
+              equivocada buscando el resultado de la otra etapa. */}
+          {resultadosFinal?.activa && (
+            <div className="animate-aparecer mt-12 flex justify-center">
+              <Link to="/resultados_final_macrorregional">
+                <Boton variante="rojo" tamano="grande" className="animate-latido font-black">
+                  {resultadosFinal.titulo}
                 </Boton>
               </Link>
             </div>

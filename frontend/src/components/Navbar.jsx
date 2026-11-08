@@ -3,14 +3,10 @@ import { Link, useNavigate } from 'react-router-dom';
 import { LayoutDashboard, LogIn, Menu, UserPlus, X } from 'lucide-react';
 import { rutaPorRol, useAuth } from '../lib/auth.jsx';
 import { useAjustes } from '../lib/ajustes';
+import { api } from '../lib/api';
 import Logo from './Logo.jsx';
 
-/**
- * Los resultados van primero y subrayados: es lo que todo el mundo viene a
- * buscar cuando salen, y a diferencia de los demás es una página aparte.
- */
-const ENLACES = [
-  { href: '/resultados_etapa_institucional', texto: 'Resultados', ruta: true },
+const ENLACES_FIJOS = [
   { href: '#etapas', texto: 'Etapas' },
   { href: '#premios', texto: 'Premios' },
 ];
@@ -23,6 +19,31 @@ export default function Navbar() {
   const navegar = useNavigate();
   // Cerradas las inscripciones, el botón sobra: queda solo el de ingresar.
   const seInscribe = !ajustes.inscripcionesCerradas;
+
+  // «Resultados» lleva a la etapa que se esté consultando. La de la final
+  // solo se da por activa cuando la institucional ya cerró, así que basta
+  // con preguntar por ella: si está abierta, es la que se viene a ver.
+  const [finalAbierta, setFinalAbierta] = useState(false);
+
+  /**
+   * Los resultados van primero y subrayados: es lo que todo el mundo viene a
+   * buscar cuando salen, y a diferencia de los demás es una página aparte.
+   */
+  const enlaces = [
+    {
+      href: finalAbierta ? '/resultados_final_macrorregional' : '/resultados_etapa_institucional',
+      texto: 'Resultados',
+      ruta: true,
+    },
+    ...ENLACES_FIJOS,
+  ];
+
+  useEffect(() => {
+    api
+      .get('/final/publico')
+      .then(({ data }) => setFinalAbierta(Boolean(data.activa)))
+      .catch(() => setFinalAbierta(false));
+  }, []);
 
   useEffect(() => {
     const alHacerScroll = () => setConFondo(window.scrollY > 24);
@@ -51,7 +72,7 @@ export default function Navbar() {
         </Link>
 
         <div className="hidden items-center gap-8 lg:flex">
-          {ENLACES.map((enlace) => {
+          {enlaces.map((enlace) => {
             const estilo = `text-xl transition hover:text-granate-500 ${
               enlace.ruta ? 'font-bold underline underline-offset-8' : 'font-medium'
             } ${conFondo ? 'text-slate-700' : 'text-white/90'}`;
@@ -112,7 +133,7 @@ export default function Navbar() {
 
       {abierto && (
         <div className="border-t border-slate-100 bg-white px-6 pb-6 pt-2 lg:hidden">
-          {ENLACES.map((enlace) => {
+          {enlaces.map((enlace) => {
             const estilo = `block border-b border-slate-100 py-4 text-xl text-slate-700 ${
               enlace.ruta ? 'font-bold underline underline-offset-4' : 'font-medium'
             }`;

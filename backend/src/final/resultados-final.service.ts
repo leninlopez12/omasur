@@ -3,6 +3,7 @@ import * as ExcelJS from 'exceljs';
 import { Modalidad } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CorregidoFinal, ExamenFinalService } from './examen-final.service';
+import { ResultadosService } from '../resultados/resultados.service';
 import { GRADOS } from '../common/grados';
 import { GRANATE, escribirEncabezados, escribirTitulo, nombreArchivo } from '../common/excel';
 
@@ -53,6 +54,75 @@ const AMBITOS = [
 
 /** Dónde compite una delegación. El general no es de nadie: es la suma. */
 export type Ambito = 'PRIVADO' | 'PUBLICO';
+
+/** Cómo se nombra la modalidad de una institución en la premiación. */
+const MODALIDAD_TEXTO: Record<Modalidad, string> = {
+  ESTATAL: 'Pública',
+  PARTICULAR: 'Particular',
+  GRUPO_ESTUDIO: 'Grupo de estudio',
+};
+
+/**
+ * Lo que vale cada puesto para el campeonato de delegaciones.
+ *
+ * La escala baja de golpe en el podio y se aplana del cuarto para abajo: un
+ * primer puesto no se compensa juntando quintos, y a la vez el cuarto y el
+ * décimo valen lo mismo porque los dos son «estar entre los diez». Es la
+ * tabla que fijó la comisión y no una fórmula nuestra.
+ */
+const PUNTOS_CAMPEONATO: Record<number, number> = { 1: 10, 2: 6, 3: 4 };
+
+/** Del cuarto al décimo, todos suman esto. */
+const PUNTOS_RESTO = 2;
+
+/** Más abajo del décimo puesto ya no se suma nada. */
+const PUESTOS_QUE_SUMAN = 10;
+
+/** La escala, escrita para mostrarla tal cual en pantalla. */
+const ESCALA_CAMPEONATO = [
+  { texto: '1er puesto', puntos: PUNTOS_CAMPEONATO[1] },
+  { texto: '2do puesto', puntos: PUNTOS_CAMPEONATO[2] },
+  { texto: '3er puesto', puntos: PUNTOS_CAMPEONATO[3] },
+  { texto: `Del 4to al ${PUESTOS_QUE_SUMAN}mo puesto`, puntos: PUNTOS_RESTO },
+];
+
+/** Cuántas delegaciones suben al estrado por el premio mayor. */
+const CAMPEONES = 3;
+
+/** Lo que se ve de una delegación en el campeonato. */
+export interface CampeonFinal {
+  tutorId: string;
+  tutor: string;
+  institucion: string;
+  modalidad: Modalidad;
+  modalidadTexto: string;
+  ambito: Ambito;
+  ambitoTexto: string;
+  /** Su lugar en el campeonato, compartido si empata en todo lo que decide. */
+  puesto: number;
+  empatado: boolean;
+  puntos: number;
+  /** En cuántas categorías distintas puntuó, que es de lo que se trata. */
+  categorias: number;
+  categoriasTexto: string;
+  /** Cuántos de sus alumnos entraron entre los diez primeros, y cuántos vinieron. */
+  premiados: number;
+  rindieron: number;
+  primeros: number;
+  segundos: number;
+  terceros: number;
+  /** Los puntos que suma cada alumno: el sustento del premio. */
+  alumnos: {
+    dni: string;
+    nombres: string;
+    categoria: string;
+    grado: string;
+    puesto: number;
+    empatado: boolean;
+    puntaje: number;
+    puntos: number;
+  }[];
+}
 
 export interface ConfigResultadosFinal {
   /** Abre los resultados en la cuenta de cada tutor. */
@@ -120,6 +190,9 @@ export class ResultadosFinalService {
   constructor(
     private prisma: PrismaService,
     private examen: ExamenFinalService,
+    // Para saber si la consulta de la etapa institucional sigue abierta: la
+    // portada no ofrece las dos a la vez.
+    private institucional: ResultadosService,
   ) {}
 
   // ------------------------------------------------------------- configuración
@@ -201,6 +274,31 @@ export class ResultadosFinalService {
   private async modalidades(): Promise<Map<string, Modalidad>> {
     const tutores = await this.prisma.tutor.findMany({ select: { id: true, modalidad: true } });
     return new Map(tutores.map((t) => [t.id, t.modalidad]));
+  }
+
+  /**
+   * La ficha de cada delegación: quién la lleva, de dónde y de qué modalidad.
+   *
+   * El examen solo guarda el nombre de la institución; el del tutor hay que
+   * buscarlo, y el campeonato premia al tutor tanto como al colegio.
+   */
+  private async delegaciones(): Promise<
+    Map<string, { tutor: string; institucion: string; modalidad: Modalidad }>
+  > {
+    const tutores = await this.prisma.tutor.findMany({
+      select: { id: true, nombres: true, apellidos: true, institucion: true, modalidad: true },
+    });
+
+    return new Map(
+      tutores.map((t) => [
+        t.id,
+        {
+          tutor: `${t.nombres} ${t.apellidos}`.trim(),
+          institucion: t.institucion,
+          modalidad: t.modalidad,
+        },
+      ]),
+    );
   }
 
   /**
@@ -368,9 +466,10 @@ export class ResultadosFinalService {
    * no tiene a nadie viene marcada para que la pantalla lo diga.
    */
   async presentacion() {
-    const [todas, modalidades, config, consolidado] = await Promise.all([
+    const [todas, modalidades, delegaciones, config, consolidado] = await Promise.all([
       this.examen.todas(),
       this.modalidades(),
+      this.delegaciones(),
       this.config(),
       this.examen.consolidado(),
     ]);
@@ -405,6 +504,7 @@ export class ResultadosFinalService {
 
         laminas.push({
           id: `${puesto}-${ambito.id.toLowerCase()}`,
+          tipo: 'lugar',
           puesto,
           ambito: ambito.id,
           ambitoTexto: ambito.texto,
@@ -419,6 +519,44 @@ export class ResultadosFinalService {
       }
     }
 
+    /**
+     * La última lámina del acto: el premio mayor.
+     *
+     * Va después del primer lugar porque se entrega al final, y mira la tabla
+     * general —no la de privados ni la de públicos—: el campeonato es uno
+     * solo y la modalidad va como dato en el renglón.
+     */
+    const campeones = this.tablaCampeones(this.ordenar(todas, modalidades), delegaciones)
+      .filter((d) => d.puesto <= CAMPEONES)
+      .map((d) => ({
+        puesto: d.puesto,
+        ordinal: `${ORDINALES[d.puesto]} LUGAR`,
+        tutor: d.tutor || 'Sin tutor registrado',
+        institucion: d.institucion,
+        modalidadTexto: d.modalidadTexto,
+        ambitoTexto: d.ambitoTexto,
+        puntos: d.puntos,
+        categorias: d.categorias,
+        premiados: d.premiados,
+        empatado: d.empatado,
+      }));
+
+    laminas.push({
+      id: 'campeones-podio',
+      tipo: 'campeones',
+      // Primer lugar para la pantalla: corona y serpentina dorada, que es el
+      // remate del acto.
+      puesto: 1,
+      ambito: 'GENERAL',
+      ambitoTexto: 'Premio mayor',
+      titulo: 'CAMPEONES DE CAMPEONES',
+      subtitulo: NOMBRE_CONCURSO,
+      detalle: 'Las delegaciones con más puntos sumando los puestos de todas sus categorías.',
+      categorias: [],
+      campeones,
+      premiados: campeones.length,
+    } as any);
+
     return {
       lugares: LUGARES,
       ambitos: AMBITOS,
@@ -432,6 +570,157 @@ export class ResultadosFinalService {
         completo: consolidado.resumen.salones > 0 && consolidado.resumen.pendientes === 0,
       },
       publicado: config.publicado,
+    };
+  }
+
+  // -------------------------------------------------- campeones de campeones
+
+  /** Lo que suma un alumno por el puesto que sacó en su categoría. */
+  private puntosDelPuesto(puesto: number): number {
+    if (puesto > PUESTOS_QUE_SUMAN) return 0;
+    return PUNTOS_CAMPEONATO[puesto] ?? PUNTOS_RESTO;
+  }
+
+  /**
+   * El campeonato de delegaciones, sobre la tabla general de puestos.
+   *
+   * Aquí no se premia a un alumno sino a quien llevó al equipo: suma cada uno
+   * de sus alumnos que entró entre los diez primeros de su categoría, con la
+   * escala de la comisión. Por eso gana quien reparte premiados en muchas
+   * categorías y no quien trajo una estrella sola: un primer puesto son diez
+   * puntos, pero cinco categorías con un cuarto puesto cada una son también
+   * diez y de más mérito para la delegación.
+   *
+   * El empate se resuelve en ese mismo orden —puntos, categorías distintas y
+   * después cuántos primeros, segundos y terceros— y si aun así coinciden en
+   * todo eso, comparten el lugar: inventar un desempate que nadie acordó el
+   * día del acto sería peor que entregar dos trofeos.
+   *
+   * Los puestos salen de la tabla general y no de la de privados o públicos:
+   * el premio mayor es uno solo para toda la olimpiada, y la modalidad se
+   * muestra como dato, no como una liga aparte.
+   */
+  private tablaCampeones(
+    lista: PuestoFinal[],
+    delegaciones: Map<string, { tutor: string; institucion: string; modalidad: Modalidad }>,
+  ): CampeonFinal[] {
+    const porDelegacion = new Map<string, PuestoFinal[]>();
+    for (const r of lista) {
+      const clave = r.tutorId || r.institucion;
+      if (!porDelegacion.has(clave)) porDelegacion.set(clave, []);
+      porDelegacion.get(clave)!.push(r);
+    }
+
+    const filas = [...porDelegacion.entries()]
+      .map(([clave, suyos]) => {
+        const ficha = delegaciones.get(clave);
+        const modalidad = ficha?.modalidad ?? suyos[0].modalidad;
+        const ambito = this.ambitoDe(modalidad);
+
+        const puntuados = suyos
+          .filter((r) => r.puesto <= PUESTOS_QUE_SUMAN)
+          .sort((a, b) => a.puesto - b.puesto || a.categoria.localeCompare(b.categoria));
+
+        const alumnos = puntuados.map((r) => ({
+          dni: r.dni,
+          nombres: r.nombres,
+          categoria: r.categoria,
+          grado: r.grado,
+          puesto: r.puesto,
+          empatado: r.empatado,
+          puntaje: r.puntaje,
+          puntos: this.puntosDelPuesto(r.puesto),
+        }));
+
+        const cuantos = (puesto: number) => puntuados.filter((r) => r.puesto === puesto).length;
+        const categorias = [...new Set(alumnos.map((a) => a.categoria))].sort();
+
+        return {
+          tutorId: clave,
+          tutor: ficha?.tutor || '',
+          institucion: ficha?.institucion || suyos[0].institucion || 'Sin nombre',
+          modalidad,
+          modalidadTexto: MODALIDAD_TEXTO[modalidad],
+          ambito,
+          ambitoTexto: ambito === 'PRIVADO' ? 'Privado' : 'Público',
+          puesto: 0,
+          empatado: false,
+          puntos: alumnos.reduce((n, a) => n + a.puntos, 0),
+          categorias: categorias.length,
+          categoriasTexto: categorias.join(' · '),
+          premiados: alumnos.length,
+          rindieron: suyos.length,
+          primeros: cuantos(1),
+          segundos: cuantos(2),
+          terceros: cuantos(3),
+          // Para el desempate de cortesía, que no decide el premio.
+          puntajeTotal: puntuados.reduce((n, r) => n + r.puntaje, 0),
+          alumnos,
+        };
+      })
+      // Sin ningún alumno entre los diez primeros no se entra al campeonato:
+      // una delegación con cero puntos no está compitiendo por este premio.
+      .filter((d) => d.premiados > 0)
+      .sort(
+        (a, b) =>
+          b.puntos - a.puntos ||
+          b.categorias - a.categorias ||
+          b.primeros - a.primeros ||
+          b.segundos - a.segundos ||
+          b.terceros - a.terceros ||
+          b.puntajeTotal - a.puntajeTotal ||
+          a.institucion.localeCompare(b.institucion, 'es'),
+      );
+
+    // Lo que decide el premio son estos cinco números; el puntaje solo ordena
+    // la pantalla, así que quien coincide en los cinco sale como empatado
+    // aunque uno haya quedado una línea más arriba.
+    const decide = (d: typeof filas[number]) =>
+      [d.puntos, d.categorias, d.primeros, d.segundos, d.terceros].join('·');
+
+    return filas.map((fila) => {
+      const { puntajeTotal, ...d } = fila;
+      return {
+        ...d,
+        puesto: filas.findIndex((x) => decide(x) === decide(fila)) + 1,
+        empatado: filas.filter((x) => decide(x) === decide(fila)).length > 1,
+      };
+    });
+  }
+
+  /**
+   * El campeonato con su sustento: la tabla entera y por qué gana cada uno.
+   *
+   * Lo que se proyecta en el acto son tres renglones; esto es lo que hay que
+   * poder mostrar cuando un tutor pregunte por qué no fue él, con los alumnos
+   * y los puntos de cada uno a la vista.
+   */
+  async campeones() {
+    const [lista, delegaciones, consolidadoExamen] = await Promise.all([
+      this.calcular(),
+      this.delegaciones(),
+      this.examen.consolidado(),
+    ]);
+
+    const tabla = this.tablaCampeones(lista, delegaciones);
+
+    return {
+      escala: ESCALA_CAMPEONATO,
+      puestosQueSuman: PUESTOS_QUE_SUMAN,
+      cuantosPremian: CAMPEONES,
+      podio: tabla.filter((d) => d.puesto <= CAMPEONES),
+      tabla,
+      resumen: {
+        rindieron: lista.length,
+        delegaciones: new Set(lista.map((r) => r.tutorId)).size,
+        conPuntos: tabla.length,
+        categorias: new Set(lista.map((r) => r.categoria)).size,
+        // Mientras falte un salón por entregar, los puestos todavía se mueven
+        // y con ellos los puntos: esto no es definitivo hasta que lleguen.
+        salonesPendientes: consolidadoExamen.resumen.pendientes,
+        completo:
+          consolidadoExamen.resumen.salones > 0 && consolidadoExamen.resumen.pendientes === 0,
+      },
     };
   }
 
@@ -850,11 +1139,28 @@ export class ResultadosFinalService {
 
   // ------------------------------------------------------------------- consultas
 
-  /** Lo que ve la portada: si la consulta está abierta y con qué título. */
+  /**
+   * Lo que ve la portada: si la consulta está abierta y con qué título.
+   *
+   * La de la final espera a que cierre la de la etapa institucional. No es un
+   * capricho de orden: son dos consultas por DNI en la misma portada y, con
+   * las dos abiertas, el que busca su resultado de la final acaba entrando a
+   * la de la institucional y leyendo que «no clasificó». Una a la vez, y la
+   * que manda es la etapa en la que está el concurso.
+   */
   async estadoPublico() {
-    const config = await this.config();
+    const [config, institucional] = await Promise.all([
+      this.config(),
+      this.institucional.estadoPublico(),
+    ]);
+
     return {
-      activa: config.consultaActiva,
+      activa: config.consultaActiva && !institucional.activa,
+      /** Lo que decidió la comisión, aunque todavía no se vea en la portada. */
+      abierta: config.consultaActiva,
+      institucionalAbierta: institucional.activa,
+      /** Abierta aquí pero tapada por la institucional: hay que cerrar esa. */
+      esperando: config.consultaActiva && institucional.activa,
       titulo: config.tituloPublico,
       publicado: config.publicado,
       publicadoEn: config.publicadoEn,
@@ -862,10 +1168,38 @@ export class ResultadosFinalService {
     };
   }
 
+  /**
+   * La misma tabla, contada dos veces: entre todos y dentro de su ámbito.
+   *
+   * El puesto que se premia y el que se consulta no son el mismo número. En
+   * la premiación compiten todos los de la categoría; en la consulta, cada
+   * uno quiere saber cómo le fue entre los suyos, porque un colegio estatal
+   * no se mide contra un grupo de estudio. Se devuelven los dos para que la
+   * ficha pueda decirlo sin que nadie los confunda.
+   */
+  private async tablas() {
+    const [todas, modalidades] = await Promise.all([this.examen.todas(), this.modalidades()]);
+    const general = this.ordenar(todas, modalidades);
+
+    const porAmbito = new Map<string, PuestoFinal>();
+    for (const { id } of AMBITOS) {
+      const suyos = todas.filter((f) => this.ambitoDe(modalidades.get(f.tutorId)) === id);
+      for (const r of this.ordenar(suyos, modalidades)) {
+        porAmbito.set(`${r.dni}-${r.categoria}`, r);
+      }
+    }
+
+    return { general, porAmbito };
+  }
+
   async consultar(dni: string) {
-    const config = await this.config();
-    if (!config.consultaActiva) {
-      throw new NotFoundException('La consulta de la final todavía no está habilitada.');
+    const [estado, config] = await Promise.all([this.estadoPublico(), this.config()]);
+    if (!estado.activa) {
+      throw new NotFoundException(
+        estado.esperando
+          ? 'La consulta de la final se abre cuando cierre la de la etapa institucional.'
+          : 'La consulta de la final todavía no está habilitada.',
+      );
     }
 
     const limpio = String(dni || '').trim();
@@ -873,27 +1207,43 @@ export class ResultadosFinalService {
       throw new BadRequestException('Escriba el DNI del estudiante, solo números');
     }
 
-    const suyos = (await this.calcular()).filter((r) => r.dni === limpio);
+    const { general, porAmbito } = await this.tablas();
+    const suyos = general.filter((r) => r.dni === limpio);
     if (suyos.length === 0) {
       throw new NotFoundException('No encontramos ese DNI entre los que rindieron la final.');
     }
 
-    return suyos.map((r) => ({
-      nombres: r.nombres,
-      dni: r.dni,
-      institucion: r.institucion,
-      categoria: r.categoria,
-      grado: r.grado,
-      puesto: r.puesto,
-      empatado: r.empatado,
-      horaEntrega: r.horaEntrega,
-      minutos: r.minutos,
-      correctas: r.correctas,
-      incorrectas: r.incorrectas,
-      blancos: r.blancos,
-      puntaje: r.puntaje,
-      premiado: r.puesto <= config.puestos,
-    }));
+    return suyos.map((r) => {
+      const enAmbito = porAmbito.get(`${r.dni}-${r.categoria}`);
+      const deSuCategoria = general.filter((x) => x.categoria === r.categoria);
+      const deSuGrupo = deSuCategoria.filter((x) => x.ambito === r.ambito);
+
+      return {
+        nombres: r.nombres,
+        dni: r.dni,
+        institucion: r.institucion,
+        categoria: r.categoria,
+        grado: r.grado,
+        /** Su puesto entre todos los de su categoría, que es el de la premiación. */
+        puesto: r.puesto,
+        empatado: r.empatado,
+        rindieron: deSuCategoria.length,
+        /** Y el que viene a buscar: su lugar entre los de su mismo ámbito. */
+        ambito: r.ambito,
+        ambitoTexto: r.ambito === 'PRIVADO' ? 'Privado' : 'Público',
+        modalidadTexto: MODALIDAD_TEXTO[r.modalidad],
+        puestoAmbito: enAmbito?.puesto ?? r.puesto,
+        empatadoAmbito: enAmbito?.empatado ?? r.empatado,
+        rindieronAmbito: deSuGrupo.length,
+        horaEntrega: r.horaEntrega,
+        minutos: r.minutos,
+        correctas: r.correctas,
+        incorrectas: r.incorrectas,
+        blancos: r.blancos,
+        puntaje: r.puntaje,
+        premiado: r.puesto <= config.puestos,
+      };
+    });
   }
 
   /** Lo que ve el tutor en su cuenta, cuando ya está publicado. */

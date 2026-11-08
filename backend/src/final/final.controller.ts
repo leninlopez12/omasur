@@ -503,6 +503,13 @@ export class FinalController {
     return this.resultados.presentacion();
   }
 
+  /** El campeonato de delegaciones y el sustento de por qué gana cada una. */
+  @Comision('final-presentacion')
+  @Get('resultados/campeones')
+  campeones() {
+    return this.resultados.campeones();
+  }
+
   @Comision('final-consultar')
   @Get('resultados/buscar')
   buscar(@Query('q') q: string) {

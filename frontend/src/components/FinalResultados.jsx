@@ -506,10 +506,18 @@ export function FinalPublicacion() {
   const [aviso, setAviso] = useState('');
   const [procesando, setProcesando] = useState('');
 
+  const [publico, setPublico] = useState(null);
+
   const cargar = useCallback(async () => {
     try {
-      const { data } = await api.get('/final/resultados');
+      const [{ data }, estado] = await Promise.all([
+        api.get('/final/resultados'),
+        // Lo mismo que ve la portada: dice si la consulta se está viendo de
+        // verdad o si la institucional todavía la está tapando.
+        api.get('/final/publico').then((r) => r.data),
+      ]);
       setDatos(data);
+      setPublico(estado);
       setTitulo(data.config.tituloPublico);
       setPremiados(data.config.puestos);
     } catch (e) {
@@ -619,20 +627,45 @@ export function FinalPublicacion() {
           <div>
             <h4 className="text-xl font-black text-slate-900">Consulta pública por DNI</h4>
             <p className="mt-2 text-base text-slate-600">
-              Cualquiera escribe el DNI del estudiante en la portada y ve su puntaje y su puesto.
+              Cualquiera escribe el DNI del estudiante en la portada y ve en qué lugar quedó: entre
+              los de su ámbito —privados o públicos— dentro de su categoría, que es como se premia.
+              Es para todos los que rindieron la final, no solo para los premiados.
             </p>
           </div>
           <Etiqueta
             compacto
             className={
-              config.consultaActiva
+              publico?.activa
                 ? 'bg-emerald-100 text-emerald-800'
-                : 'bg-slate-100 text-slate-600'
+                : config.consultaActiva
+                  ? 'bg-amber-100 text-amber-800'
+                  : 'bg-slate-100 text-slate-600'
             }
           >
-            {config.consultaActiva ? 'Abierta' : 'Cerrada'}
+            {publico?.activa ? 'Abierta' : config.consultaActiva ? 'En espera' : 'Cerrada'}
           </Etiqueta>
         </div>
+
+        {/* Dos consultas por DNI en la misma portada confunden a cualquiera,
+            así que la de la final espera su turno. El interruptor de aquí ya
+            quedó puesto: lo que falta es cerrar la otra. */}
+        {publico?.esperando && (
+          <div className="mt-5">
+            <Aviso tipo="alerta" icono={AlertCircle} compacto titulo="Falta cerrar la institucional">
+              La consulta de la etapa institucional sigue abierta y, mientras lo esté, el botón de
+              la final no sale en la portada. Ciérrela en Clasificatoria institucional · Resultados
+              · General y publicación y esta aparece sola.
+            </Aviso>
+          </div>
+        )}
+
+        {publico?.activa && (
+          <div className="mt-5">
+            <Aviso tipo="info" icono={CheckCircle2} compacto>
+              El botón ya está en la portada y lleva a la página de la final.
+            </Aviso>
+          </div>
+        )}
 
         <div className="mt-6 space-y-5">
           <Campo

@@ -43,7 +43,8 @@ export const PERMISOS_FINAL_RESULTADOS = [
   {
     id: 'final-presentacion',
     texto: 'Presentación resultados',
-    detalle: 'Las láminas de la premiación para proyectarlas en pantalla grande.',
+    detalle:
+      'Las láminas de la premiación para proyectarlas, con el premio mayor y su sustento.',
     aviso: 'Enseña los ganadores de todos los lugares antes de que se anuncien.',
   },
   { id: 'final-consultar', texto: 'Consultar', detalle: 'Buscar cómo le fue a una delegación.' },
