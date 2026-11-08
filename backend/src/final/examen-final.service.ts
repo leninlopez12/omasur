@@ -21,6 +21,34 @@ export const ESTRUCTURA: Record<NivelFinal, { alternativas: number; numericas: n
   PRIMARIA: { alternativas: 10, numericas: 5 },
 };
 
+/**
+ * El color de cada respuesta en el acta.
+ *
+ * Marcar veinte casillas por alumno a mano es donde se cuelan los errores:
+ * con cada letra de un color, una fila mal corrida o una casilla olvidada se
+ * ven de lejos, sin leerlas una por una. Los tonos son suaves a propósito,
+ * que esto también se imprime.
+ */
+const COLOR_RESPUESTA: Record<string, { fondo: string; letra: string }> = {
+  A: { fondo: 'FFDBEAFE', letra: 'FF1E3A8A' },
+  B: { fondo: 'FFDCFCE7', letra: 'FF14532D' },
+  C: { fondo: 'FFFEF3C7', letra: 'FF78350F' },
+  D: { fondo: 'FFF3E8FF', letra: 'FF4C1D95' },
+  E: { fondo: 'FFFFE4E6', letra: 'FF881337' },
+  BLANCO: { fondo: 'FFE5E7EB', letra: 'FF4B5563' },
+};
+
+/** El nombre de una columna en Excel: 1 es A, 27 es AA. */
+function columnaExcel(n: number): string {
+  let nombre = '';
+  while (n > 0) {
+    const resto = (n - 1) % 26;
+    nombre = String.fromCharCode(65 + resto) + nombre;
+    n = Math.floor((n - 1) / 26);
+  }
+  return nombre;
+}
+
 export const nivelDe = (categoria: string): NivelFinal =>
   (GRADOS.find((g) => g.categoria === categoria)?.nivel as NivelFinal) || 'PRIMARIA';
 
@@ -203,7 +231,10 @@ export class ExamenFinalService {
 
   /** El acta del salón, con su gente ya escrita y las casillas listas. */
   async plantilla(nivel: string, numero: number): Promise<{ buffer: Buffer; nombre: string }> {
-    const salon = await this.final.salon(nivel, numero);
+    const [salon, dia] = await Promise.all([
+      this.final.salon(nivel, numero),
+      this.final.config(),
+    ]);
     const forma = ESTRUCTURA[salon.nivel];
     const mezclado = new Set(salon.alumnos.map((a) => a.categoria)).size > 1;
 
@@ -236,12 +267,16 @@ export class ExamenFinalService {
     ]);
     titulo.font = { bold: true, size: 13, color: { argb: 'FF111827' } };
 
+    // La numeración es la del examen impreso, corrida de principio a fin:
+    // el responsable copia la fila sin tener que traducir «N1» a «16».
     hoja.addRow([
-      `P1 a P${forma.alternativas}: marque A, B, C, D, E o BLANCO. ` +
-        `N1 a N${forma.numericas}: escriba el número que respondió; en blanco si no respondió.`,
+      `Preguntas 1 a ${forma.alternativas}: marque A, B, C, D, E o BLANCO. ` +
+        `Preguntas ${forma.alternativas + 1} a ${forma.alternativas + forma.numericas}: ` +
+        'escriba el número que respondió; en blanco si no respondió.',
     ]).font = { size: 10, italic: true, color: { argb: 'FF6B7280' } };
     hoja.addRow([
-      'HORA DE ENTREGA: la hora en que ese alumno entregó, en formato 09:47. A igual puntaje pasa primero quien entregó antes.',
+      'HORA DE ENTREGA: elíjala de la lista de la casilla o escríbala a mano, en formato 09:47. ' +
+        'A igual puntaje pasa primero quien entregó antes.',
     ]).font = { size: 10, italic: true, color: { argb: 'FF6B7280' } };
     hoja.addRow(['Al que no se presentó, déjelo con todo en blanco.']).font = {
       size: 10,
@@ -255,8 +290,11 @@ export class ExamenFinalService {
       'DNI',
       'APELLIDOS Y NOMBRES',
       ...(mezclado ? ['CAT.'] : []),
-      ...Array.from({ length: forma.alternativas }, (_, i) => `P${i + 1}`),
-      ...Array.from({ length: forma.numericas }, (_, i) => `N${i + 1}`),
+      ...Array.from({ length: forma.alternativas }, (_, i) => `${i + 1}`),
+      ...Array.from(
+        { length: forma.numericas },
+        (_, i) => `${forma.alternativas + i + 1}`,
+      ),
       'HORA DE ENTREGA',
     ]);
     encabezado.font = { bold: true, color: { argb: 'FFFFFFFF' } };
@@ -280,6 +318,7 @@ export class ExamenFinalService {
 
     if (salon.alumnos.length > 0) {
       const opciones = '"' + ALTERNATIVAS.join(',') + '"';
+      const horas = this.horasSugeridas(dia.bloques[salon.nivel]);
       const ultima = primera + salon.alumnos.length - 1;
 
       for (let f = primera; f <= ultima; f++) {
@@ -292,8 +331,18 @@ export class ExamenFinalService {
             bottom: { style: 'thin', color: { argb: 'FFE5E7EB' } },
             right: { style: 'thin', color: { argb: 'FFE5E7EB' } },
           };
+          // El fondo distingue los tres bloques de un vistazo; encima de este
+          // va el color de cada respuesta, que lo pinta Excel al escribirla.
+          celda.fill = {
+            type: 'pattern',
+            pattern: 'solid',
+            fgColor: {
+              argb: c < primeraNum ? 'FFFDF3F5' : c < colHora ? 'FFFFF7ED' : 'FFF1F5F9',
+            },
+          };
 
           if (c < primeraNum) {
+            celda.font = { bold: true, size: 12 };
             celda.dataValidation = {
               type: 'list',
               allowBlank: true,
@@ -306,9 +355,21 @@ export class ExamenFinalService {
             // Las numéricas y la hora van como texto: con formato de número,
             // Excel convierte «09:47» en una fracción de día y «007» en 7.
             celda.numFmt = '@';
+            if (c === colHora && horas) {
+              // Sugerida, no obligatoria: la lista ahorra escribir, pero si
+              // entregó a una hora que no está en ella se escribe a mano.
+              celda.dataValidation = {
+                type: 'list',
+                allowBlank: true,
+                formulae: [horas],
+                showErrorMessage: false,
+              };
+            }
           }
         }
       }
+
+      this.pintarRespuestas(hoja, primera, ultima, primeraAlt, primeraNum, colHora);
     }
 
     return {
@@ -372,7 +433,8 @@ export class ExamenFinalService {
           const valor = this.comoAlternativa(bruto);
           if (valor === null && String(bruto ?? '').trim() !== '') {
             errores.push(
-              `Fila ${numeroFila} (${alumno.nombres}), P${i + 1}: «${String(bruto).trim()}» no es una alternativa válida.`,
+              `Fila ${numeroFila} (${alumno.nombres}), pregunta ${i + 1}: ` +
+                `«${String(bruto).trim()}» no es una alternativa válida.`,
             );
           }
           alternativas.push(valor ?? 'BLANCO');
@@ -383,8 +445,12 @@ export class ExamenFinalService {
           numericas.push(this.comoNumero(this.plano(fila.getCell(primeraNum + i).value)));
         }
 
-        const horaBruta = String(this.plano(fila.getCell(colHora).value) ?? '').trim();
-        const horaEntrega = this.comoHora(horaBruta);
+        // Sin pasarla por String primero: si la casilla quedó con formato de
+        // hora, lo que llega es una fecha o la fracción del día, y volverla
+        // texto aquí perdía justo lo que comoHora sabe interpretar.
+        const horaCruda = this.plano(fila.getCell(colHora).value);
+        const horaEntrega = this.comoHora(horaCruda);
+        const horaBruta = String(horaCruda ?? '').trim();
         if (horaBruta && !horaEntrega) {
           errores.push(
             `Fila ${numeroFila} (${alumno.nombres}): «${horaBruta}» no es una hora. Escríbala como 09:47.`,
@@ -613,6 +679,89 @@ export class ExamenFinalService {
     return lista;
   }
 
+  /**
+   * Las horas que ofrece la casilla, de cinco en cinco.
+   *
+   * Desde que empieza el turno hasta un rato después de que termina, porque
+   * siempre hay quien entrega sobre la hora o un poco pasado.
+   */
+  private horasSugeridas(bloque?: { inicio: string; fin: string }): string | null {
+    if (!bloque?.inicio || !bloque?.fin) return null;
+
+    const minutos = (hhmm: string) => {
+      const [h, m] = hhmm.split(':').map(Number);
+      return Number.isFinite(h) && Number.isFinite(m) ? h * 60 + m : null;
+    };
+
+    const desde = minutos(bloque.inicio);
+    const hasta = minutos(bloque.fin);
+    if (desde === null || hasta === null || hasta <= desde) return null;
+
+    const lista: string[] = [];
+    for (let t = desde; t <= hasta + 20 && lista.length < 40; t += 5) {
+      lista.push(
+        `${String(Math.floor(t / 60) % 24).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`,
+      );
+    }
+    // Excel no admite listas en línea de más de 255 caracteres.
+    const texto = lista.join(',');
+    return texto.length > 250 ? null : '"' + texto + '"';
+  }
+
+  /**
+   * El color de cada casilla, puesto por Excel mientras se escribe.
+   *
+   * Va como formato condicional y no como relleno fijo porque el acta se
+   * llena después de bajarla: la casilla tiene que encenderse cuando el
+   * responsable escribe la letra, no antes.
+   */
+  private pintarRespuestas(
+    hoja: ExcelJS.Worksheet,
+    primera: number,
+    ultima: number,
+    primeraAlt: number,
+    primeraNum: number,
+    colHora: number,
+  ) {
+    const relleno = (argb: string) =>
+      ({ type: 'pattern', pattern: 'solid', bgColor: { argb } }) as any;
+
+    hoja.addConditionalFormatting({
+      ref: `${columnaExcel(primeraAlt)}${primera}:${columnaExcel(primeraNum - 1)}${ultima}`,
+      rules: Object.entries(COLOR_RESPUESTA).map(([alternativa, color], i) => ({
+        type: 'cellIs' as const,
+        operator: 'equal' as const,
+        priority: i + 1,
+        formulae: ['"' + alternativa + '"'],
+        style: { fill: relleno(color.fondo), font: { bold: true, color: { argb: color.letra } } },
+      })),
+    });
+
+    // Las numéricas y la hora solo dicen «ya está puesta»: lo que se busca de
+    // un vistazo es la casilla que quedó vacía.
+    for (const [desde, hasta] of [
+      [primeraNum, colHora - 1],
+      [colHora, colHora],
+    ]) {
+      if (hasta < desde) continue;
+      const inicio = `${columnaExcel(desde)}${primera}`;
+      hoja.addConditionalFormatting({
+        ref: `${inicio}:${columnaExcel(hasta)}${ultima}`,
+        rules: [
+          {
+            type: 'expression',
+            priority: 1,
+            formulae: [`LEN(TRIM(${inicio}))>0`],
+            style: {
+              fill: relleno('FFDCFCE7'),
+              font: { bold: true, color: { argb: 'FF14532D' } },
+            },
+          },
+        ],
+      });
+    }
+  }
+
   async consolidado() {
     const entregas = await this.entregas();
     const recibidos = entregas.reduce((n, e) => n + e.recibidos, 0);
@@ -665,8 +814,11 @@ export class ExamenFinalService {
       { header: 'APELLIDOS Y NOMBRES', width: 34 },
       { header: 'CAT.', width: 7 },
       { header: 'INSTITUCIÓN', width: 30 },
-      ...Array.from({ length: forma.alternativas }, (_, i) => ({ header: `P${i + 1}`, width: 6 })),
-      ...Array.from({ length: forma.numericas }, (_, i) => ({ header: `N${i + 1}`, width: 8 })),
+      ...Array.from({ length: forma.alternativas }, (_, i) => ({ header: `${i + 1}`, width: 6 })),
+      ...Array.from({ length: forma.numericas }, (_, i) => ({
+        header: `${forma.alternativas + i + 1}`,
+        width: 8,
+      })),
       { header: 'ENTREGÓ', width: 11 },
       { header: 'MIN.', width: 8 },
       { header: 'ACIERTOS', width: 11 },
@@ -899,7 +1051,28 @@ export class ExamenFinalService {
   }
 
   private comoHora(valor: unknown): string {
-    const texto = String(this.plano(valor) ?? '').trim();
+    const bruto = this.plano(valor);
+
+    // Si la casilla quedó con formato de hora, Excel no devuelve «09:47» sino
+    // la hora de verdad, en UTC. Y a veces, la fracción del día que hay
+    // debajo. Las tres formas dicen lo mismo y las tres se aceptan.
+    if (bruto instanceof Date) {
+      return (
+        String(bruto.getUTCHours()).padStart(2, '0') +
+        ':' +
+        String(bruto.getUTCMinutes()).padStart(2, '0')
+      );
+    }
+    if (typeof bruto === 'number' && bruto > 0 && bruto < 1) {
+      const total = Math.round(bruto * 24 * 60);
+      return (
+        String(Math.floor(total / 60) % 24).padStart(2, '0') +
+        ':' +
+        String(total % 60).padStart(2, '0')
+      );
+    }
+
+    const texto = String(bruto ?? '').trim();
     const m = texto.match(/^(\d{1,2}):(\d{2})/);
     if (!m) return '';
     const h = Number(m[1]);

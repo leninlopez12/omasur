@@ -116,8 +116,21 @@ export class SistemaService {
     if (datos.institucion !== undefined) cambios.institucion = datos.institucion.trim();
     if (datos.nombres !== undefined) cambios.nombres = datos.nombres.trim();
     if (datos.apellidos !== undefined) cambios.apellidos = datos.apellidos.trim();
-    if (datos.modalidad !== undefined) cambios.modalidad = datos.modalidad;
-    if (datos.nivelInstitucion !== undefined) cambios.nivelInstitucion = datos.nivelInstitucion;
+    // La modalidad y el nivel salen de una lista cerrada. Antes pasaban
+    // directo a la base: cualquier palabra suelta terminaba en un error de
+    // Prisma que el administrador leía como "falló el sistema".
+    if (datos.modalidad !== undefined) {
+      if (!Object.values(Modalidad).includes(datos.modalidad)) {
+        throw new BadRequestException('Esa modalidad no existe');
+      }
+      cambios.modalidad = datos.modalidad;
+    }
+    if (datos.nivelInstitucion !== undefined) {
+      if (!Object.values(NivelInstitucion).includes(datos.nivelInstitucion)) {
+        throw new BadRequestException('Ese nivel de institución no existe');
+      }
+      cambios.nivelInstitucion = datos.nivelInstitucion;
+    }
 
     if (datos.departamento !== undefined) {
       cambios.departamento = datos.departamento;

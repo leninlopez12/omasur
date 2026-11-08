@@ -40,7 +40,18 @@ export const PERMISOS_FINAL_RESULTADOS = [
   { id: 'final-general', texto: 'General', detalle: 'El mejor y el peor puntaje, y cada categoría.' },
   { id: 'final-top', texto: 'Por categoría', detalle: 'Los primeros puestos de cada categoría.' },
   { id: 'final-premiacion', texto: 'Premiación', detalle: 'El orden en que se llama al estrado.' },
+  {
+    id: 'final-presentacion',
+    texto: 'Presentación resultados',
+    detalle: 'Las láminas de la premiación para proyectarlas en pantalla grande.',
+    aviso: 'Enseña los ganadores de todos los lugares antes de que se anuncien.',
+  },
   { id: 'final-consultar', texto: 'Consultar', detalle: 'Buscar cómo le fue a una delegación.' },
+  {
+    id: 'final-consolidado',
+    texto: 'Consolidado general',
+    detalle: 'La final entera: los diez primeros, el mejor de cada categoría y los colegios.',
+  },
   {
     id: 'final-publicacion',
     texto: 'Publicación y consulta',

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import PanelLayout from '../layouts/PanelLayout.jsx';
 import Campanita from '../components/Campanita.jsx';
 import AvisosEnVivo from '../components/AvisosEnVivo.jsx';
-import PermisoAvisos from '../components/PermisoAvisos.jsx';
+import { RenovarAvisos } from '../components/PermisoAvisos.jsx';
 import { NotificacionesProvider } from '../lib/notificaciones.jsx';
 import {
   ContenidoComision,
@@ -69,7 +69,7 @@ function Contenido() {
       }
     >
       <AvisosEnVivo alAbrirTutor={abrirTutor} />
-      <PermisoAvisos />
+      <RenovarAvisos />
 
 
 

@@ -16,12 +16,14 @@ import {
   ImageIcon,
   Inbox,
   Landmark,
+  Layers,
   LayoutDashboard,
   ListChecks,
   LogIn,
   Mail,
   Medal,
   Megaphone,
+  MonitorPlay,
   MessageCircle,
   PencilLine,
   Printer,
@@ -90,6 +92,8 @@ import {
   ExamenEntregas,
   ExamenEnviadas,
 } from './ExamenEntregas.jsx';
+import FinalConsolidado from './FinalConsolidado.jsx';
+import FinalPresentacion from './FinalPresentacion.jsx';
 import FinalSalones from './FinalSalones.jsx';
 import FinalReparto from './FinalReparto.jsx';
 import FinalCredenciales from './FinalCredenciales.jsx';
@@ -253,6 +257,12 @@ export const SECCION_RESULTADOS_FINAL = {
     { id: 'final-top', texto: 'Por categoría', icono: Trophy, permiso: 'final-top' },
     { id: 'final-premiacion', texto: 'Premiación', icono: Medal, permiso: 'final-premiacion' },
     { id: 'final-consultar', texto: 'Consultar', icono: Search, permiso: 'final-consultar' },
+    {
+      id: 'final-consolidado',
+      texto: 'Consolidado general',
+      icono: Layers,
+      permiso: 'final-consolidado',
+    },
     { id: 'final-publicacion', texto: 'Publicación y consulta', icono: Megaphone, permiso: 'final-publicacion' },
   ],
 };
@@ -269,11 +279,69 @@ export const SECCION_RESULTADOS_FINAL = {
  * La etapa no es una pantalla: no tiene permiso propio, y lo que se reparte
  * sigue siendo cada pantalla de adentro.
  */
+/** Los diez lugares que se llaman al estrado, en el orden del acto. */
+export const LUGARES_PRESENTACION = [
+  { puesto: 10, texto: 'Décimo lugar' },
+  { puesto: 9, texto: 'Noveno lugar' },
+  { puesto: 8, texto: 'Octavo lugar' },
+  { puesto: 7, texto: 'Séptimo lugar' },
+  { puesto: 6, texto: 'Sexto lugar' },
+  { puesto: 5, texto: 'Quinto lugar' },
+  { puesto: 4, texto: 'Cuarto lugar' },
+  { puesto: 3, texto: 'Tercer lugar' },
+  { puesto: 2, texto: 'Segundo lugar' },
+  { puesto: 1, texto: 'Primer lugar' },
+];
+
+/**
+ * Los dos ámbitos de cada lugar, en el orden en que se proyectan.
+ *
+ * Privado y público se premian por separado, que no compiten por el mismo
+ * premio. La tabla que los mezcla no está en el acto: esa es la de siempre y
+ * se consulta en Resultados finales. Los mismos dos que arma
+ * `resultados-final.service.ts`: si cambian allá, cambian aquí.
+ */
+export const AMBITOS_PRESENTACION = [
+  { id: 'privado', texto: 'Privado', icono: Landmark },
+  { id: 'publico', texto: 'Público', icono: School },
+];
+
+/**
+ * La presentación: un nivel más que el resto del sidebar.
+ *
+ * Son veinte láminas y en una lista plana no se encuentra ninguna, así que
+ * cuelgan de su lugar y el menú despliega solo el que se está viendo.
+ *
+ * El tablero va primero y aparte: los números, la velocidad y el orden del
+ * acto no son una lámina, y mezclados con los lugares estorbaban a quien
+ * entra a proyectar. El permiso va en la sección: se reparte el acto entero
+ * o nada, porque dar el primer lugar y esconder el décimo no significa nada.
+ */
+export const SECCION_PRESENTACION_FINAL = {
+  id: 'final-presentacion',
+  texto: 'Presentación resultados',
+  icono: MonitorPlay,
+  permiso: 'final-presentacion',
+  hijos: [
+    { id: 'final-pres-tablero', texto: 'Tablero del acto', icono: LayoutDashboard },
+    ...LUGARES_PRESENTACION.map(({ puesto, texto }) => ({
+      id: `final-pres-${puesto}`,
+      texto,
+      icono: puesto === 1 ? Trophy : Medal,
+      hijos: AMBITOS_PRESENTACION.map((a) => ({
+        id: `final-pres-${puesto}-${a.id}`,
+        texto: a.texto,
+        icono: a.icono,
+      })),
+    })),
+  ],
+};
+
 export const ETAPA_FINAL = {
   id: 'etapa-final',
   texto: 'Final macrorregional',
   icono: Flag,
-  hijos: [SECCION_EXAMEN_FINAL, SECCION_RESULTADOS_FINAL],
+  hijos: [SECCION_EXAMEN_FINAL, SECCION_RESULTADOS_FINAL, SECCION_PRESENTACION_FINAL],
 };
 
 export const ETAPA_INSTITUCIONAL = {
@@ -372,7 +440,17 @@ export const TITULOS_COMISION = {
   'final-top': 'Final · Por categoría',
   'final-premiacion': 'Final · Premiación',
   'final-consultar': 'Final · Consultar',
+  'final-consolidado': 'Final · Consolidado general',
   'final-publicacion': 'Final · Publicación y consulta',
+  'final-pres-tablero': 'Presentación · Tablero del acto',
+  ...Object.fromEntries(
+    LUGARES_PRESENTACION.flatMap(({ puesto, texto }) =>
+      AMBITOS_PRESENTACION.map((a) => [
+        `final-pres-${puesto}-${a.id}`,
+        `Presentación · ${texto} · ${a.texto}`,
+      ]),
+    ),
+  ),
   'examen-respuestas': 'Examen · Respuestas correctas',
   'examen-puntaje': 'Examen · Puntaje',
   'examen-prueba': 'Examen · Probar el envío',
@@ -475,7 +553,11 @@ export function ContenidoComision({ seccion, detalleId, setDetalleId, irA, abrir
       {seccion === 'final-top' && <FinalResultadosTop />}
       {seccion === 'final-premiacion' && <FinalPremiacion />}
       {seccion === 'final-consultar' && <FinalConsultar />}
+      {seccion === 'final-consolidado' && <FinalConsolidado />}
       {seccion === 'final-publicacion' && <FinalPublicacion />}
+      {seccion.startsWith('final-pres-') && (
+        <FinalPresentacion lamina={seccion.replace('final-pres-', '')} irA={irA} />
+      )}
       {seccion === 'examen-respuestas' && <ExamenRespuestas />}
       {seccion === 'examen-puntaje' && <ExamenPuntaje />}
       {seccion === 'examen-prueba' && <ExamenPrueba />}

@@ -6,6 +6,21 @@ import { activarAvisos, permisoActual, renovarSuscripcion, soportaPush } from '.
 const REVISAR_MS = 5000;
 
 /**
+ * La renovación sola, sin franja.
+ *
+ * El panel del administrador ya no pide el permiso —la franja estorbaba en
+ * todas las pantallas—, pero quien ya lo dio necesita que su suscripción se
+ * renueve o los avisos dejan de llegar al cabo de un tiempo sin que nadie se
+ * entere.
+ */
+export function RenovarAvisos() {
+  useEffect(() => {
+    if (permisoActual() === 'granted') renovarSuscripcion();
+  }, []);
+  return null;
+}
+
+/**
  * Insiste hasta que la comisión acepte los avisos del navegador: mientras el
  * permiso no esté dado, la franja sigue ahí en cada carga del panel.
  *

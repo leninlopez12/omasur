@@ -35,6 +35,7 @@ export default function PanelLayout({
         icono: 'h-5 w-5',
         hijo: 'gap-3 rounded-xl py-2 pl-11 pr-4 text-base',
         nieto: 'gap-3 rounded-xl py-2 pl-[3.5rem] pr-3 text-base',
+        bisnieto: 'gap-2 rounded-lg py-1.5 pl-[4.75rem] pr-3 text-base',
         iconoHijo: 'h-4 w-4',
         chevron: 'h-4 w-4',
         marca: 'text-base',
@@ -50,6 +51,7 @@ export default function PanelLayout({
         icono: 'h-7 w-7',
         hijo: 'gap-4 rounded-2xl py-3 pl-14 pr-5 text-xl',
         nieto: 'gap-4 rounded-2xl py-3 pl-[4.5rem] pr-4 text-xl',
+        bisnieto: 'gap-3 rounded-xl py-2 pl-[6rem] pr-4 text-xl',
         iconoHijo: 'h-6 w-6',
         chevron: 'h-5 w-5',
         marca: 'text-xl',
@@ -72,8 +74,8 @@ export default function PanelLayout({
   /** Si lo que está abierto cuelga de esta rama; así se despliega sola. */
   const contiene = (seccion) => seccion.id === actual || Boolean(seccion.hijos?.some(contiene));
 
-  const sangria = [t.item, t.hijo, t.nieto];
-  const tamanoIcono = [t.icono, t.iconoHijo, t.iconoHijo];
+  const sangria = [t.item, t.hijo, t.nieto, t.bisnieto];
+  const tamanoIcono = [t.icono, t.iconoHijo, t.iconoHijo, t.iconoHijo];
 
   /**
    * Una entrada del menú con lo que lleve dentro.

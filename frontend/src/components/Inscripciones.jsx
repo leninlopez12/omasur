@@ -17,7 +17,7 @@ import { Aviso, Boton, Campo, Cargando, Etiqueta, Selector, Tarjeta } from './Ui
 import { VistaComprobante } from './PasoPago.jsx';
 import { api, mensajeError } from '../lib/api';
 import { useAuth } from '../lib/auth.jsx';
-import { DEPARTAMENTOS, ESTADOS, ETIQUETA_MODALIDAD } from '../lib/datos';
+import { DEPARTAMENTOS, ESTADOS, ETIQUETA_MODALIDAD, MODALIDADES } from '../lib/datos';
 
 /** Tarjeta de cifra, reutilizada por los paneles de la comisión. */
 export function Metrica({ valor, texto, icono: Icono, destacado = false }) {
@@ -758,6 +758,7 @@ function CorregirDatos({ datos, alCambiar }) {
   const abrir = () => {
     setCampos({
       institucion: datos.institucion || '',
+      modalidad: datos.modalidad || 'ESTATAL',
       nombres: datos.nombres || '',
       apellidos: datos.apellidos || '',
       correo: datos.correo || '',
@@ -796,7 +797,7 @@ function CorregirDatos({ datos, alCambiar }) {
           Corregir datos
         </Boton>
         <p className="text-base text-slate-600">
-          Institución, nombres, correo, celular o DNI del tutor.
+          Institución, modalidad, nombres, correo, celular o DNI del tutor.
         </p>
         {mensaje && <span className="text-base font-semibold text-emerald-700">{mensaje}</span>}
       </div>
@@ -813,6 +814,25 @@ function CorregirDatos({ datos, alCambiar }) {
           onChange={cambiar('institucion')}
           className="sm:col-span-2"
         />
+        <Selector
+          etiqueta="Modalidad"
+          compacto
+          value={campos.modalidad}
+          onChange={cambiar('modalidad')}
+          className="sm:col-span-2"
+        >
+          {MODALIDADES.map((m) => (
+            <option key={m.valor} value={m.valor}>
+              {m.label}
+            </option>
+          ))}
+        </Selector>
+        <p className="-mt-2 text-base text-slate-500 sm:col-span-2">
+          Pasar de estatal a particular (o al revés) solo cambia la etiqueta, los mínimos que se
+          le exigen y el precio de los comprobantes que suba de ahora en adelante. Los
+          comprobantes ya enviados conservan su monto, y los alumnos, el examen y los resultados
+          no se mueven.
+        </p>
         <Campo etiqueta="Nombres" compacto value={campos.nombres} onChange={cambiar('nombres')} />
         <Campo
           etiqueta="Apellidos"

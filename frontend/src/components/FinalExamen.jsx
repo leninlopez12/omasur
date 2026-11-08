@@ -10,6 +10,7 @@ import {
   ListChecks,
   Lock,
   LockOpen,
+  Send,
   Upload,
 } from 'lucide-react';
 import { Aviso, Boton, Campo, Cargando, Etiqueta, Selector, Tarjeta } from './Ui.jsx';
@@ -185,7 +186,7 @@ export function FinalExamenClave() {
         {/* -------------------------------------------------- las de marcar */}
         <h4 className="mt-8 flex items-center gap-3 text-xl font-black text-slate-900">
           <ListChecks className="h-6 w-6 text-granate-600" />
-          De alternativa · P1 a P{forma.alternativas}
+          De alternativa · 1 a {forma.alternativas}
         </h4>
 
         <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -220,7 +221,7 @@ export function FinalExamenClave() {
         {/* ------------------------------------------------ las de escribir */}
         <h4 className="mt-8 flex items-center gap-3 text-xl font-black text-slate-900">
           <Hash className="h-6 w-6 text-granate-600" />
-          De respuesta numérica · N1 a N{forma.numericas}
+          De respuesta numérica · {forma.alternativas + 1} a {forma.total}
         </h4>
         <p className="mt-2 text-base text-slate-600">
           Aquí no hay alternativas: el alumno escribe el número. Se compara como número, así que
@@ -230,7 +231,9 @@ export function FinalExamenClave() {
         <div className="mt-4 grid gap-3 sm:grid-cols-3 xl:grid-cols-5">
           {numericas.map((valor, i) => (
             <div key={i} className="rounded-2xl border-2 border-slate-200 p-3">
-              <span className="block text-base font-black text-granate-700">N{i + 1}</span>
+              <span className="block text-base font-black text-granate-700">
+                {forma.alternativas + i + 1}
+              </span>
               <input
                 value={valor}
                 inputMode="decimal"
@@ -423,6 +426,8 @@ export function FinalExamenLlenar({ soloMios = false }) {
   const [enviado, setEnviado] = useState(null);
   const [error, setError] = useState('');
   const [procesando, setProcesando] = useState('');
+  const [encima, setEncima] = useState(false);
+  const [sello, setSello] = useState(false);
   const archivoRef = useRef(null);
 
   const cargar = useCallback(async () => {
@@ -473,6 +478,11 @@ export function FinalExamenLlenar({ soloMios = false }) {
   const subir = async (evento) => {
     const elegido = evento.target.files?.[0];
     if (!elegido) return;
+    await revisarArchivo(elegido);
+  };
+
+  /** Lo mismo venga del botón o de arrastrarlo encima. */
+  const revisarArchivo = async (elegido) => {
     setError('');
     setEnviado(null);
     setArchivo(elegido);
@@ -482,6 +492,7 @@ export function FinalExamenLlenar({ soloMios = false }) {
       formulario.append('archivo', elegido);
       const { data } = await api.post(`${base}/revisar`, formulario);
       setRevision(data);
+      setEncima(false);
     } catch (e) {
       setError(mensajeError(e, 'No se pudo leer el archivo'));
       limpiar();
@@ -498,6 +509,7 @@ export function FinalExamenLlenar({ soloMios = false }) {
       formulario.append('archivo', archivo);
       const { data } = await api.post(`${base}/enviar`, formulario);
       setEnviado(data);
+      setSello(true);
       limpiar();
     } catch (e) {
       setError(mensajeError(e, 'No se pudo enviar'));
@@ -526,6 +538,7 @@ export function FinalExamenLlenar({ soloMios = false }) {
                 setId(e.target.value);
                 limpiar();
                 setEnviado(null);
+                setSello(false);
               }}
             >
               {salones.map((s) => (
@@ -564,16 +577,13 @@ export function FinalExamenLlenar({ soloMios = false }) {
         </div>
 
         <input ref={archivoRef} type="file" accept=".xlsx" className="hidden" onChange={subir} />
-        <div className="mt-6">
-          <Boton
-            variante="excel"
-            cargando={procesando === 'revisar'}
-            onClick={() => archivoRef.current?.click()}
-          >
-            <Upload className="h-6 w-6" />
-            Subir el acta llena
-          </Boton>
-        </div>
+        <BandaSubir
+          cargando={procesando === 'revisar'}
+          encima={encima}
+          setEncima={setEncima}
+          alElegir={() => archivoRef.current?.click()}
+          alSoltar={revisarArchivo}
+        />
       </Tarjeta>
 
       {error && (
@@ -583,27 +593,31 @@ export function FinalExamenLlenar({ soloMios = false }) {
       )}
 
       {enviado && (
-        <Aviso tipo="exito" icono={CheckCircle2} titulo="Acta recibida">
-          {enviado.total} respuestas guardadas
-          {enviado.ausentes > 0 && ` · ${enviado.ausentes} sin presentarse`}
+        <Aviso tipo="exito" icono={CheckCircle2} titulo="Respuestas entregadas">
+          El acta del salón {salon.numero} quedó registrada con {enviado.total}{' '}
+          {enviado.total === 1 ? 'alumno' : 'alumnos'}
           {enviado.sinHora > 0 && ` · ${enviado.sinHora} sin hora de entrega`}.
         </Aviso>
+      )}
+
+      {sello && enviado && (
+        <SelloEntregado entregado={enviado} salon={salon} alCerrar={() => setSello(false)} />
       )}
 
       {revision && (
         <Tarjeta>
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
-              <h4 className="text-xl font-black text-slate-900">Así quedó</h4>
+              <h4 className="text-xl font-black text-slate-900">Lo que se va a entregar</h4>
               <p className="mt-1 text-base text-slate-600">
-                {revision.filas.length} respuestas leídas
-                {revision.ausentes.length > 0 && ` · ${revision.ausentes.length} sin presentarse`}
+                {revision.filas.length} {revision.filas.length === 1 ? 'alumno' : 'alumnos'} con sus
+                respuestas, tal como las leyó el sistema. Revíselas antes de entregar.
               </p>
             </div>
             {revision.errores.length === 0 && (
               <Boton variante="exito" cargando={procesando === 'enviar'} onClick={enviar}>
-                <CheckCircle2 className="h-6 w-6" />
-                Enviar el acta
+                <Send className="h-6 w-6" />
+                Entregar respuestas
               </Boton>
             )}
           </div>
@@ -647,50 +661,252 @@ export function FinalExamenLlenar({ soloMios = false }) {
             </div>
           )}
 
-          <div className="mt-6 overflow-x-auto rounded-2xl border-2 border-slate-200">
-            <table className="w-full min-w-[46rem] text-left">
-              <thead className="bg-slate-50">
-                <tr className="text-base text-slate-500">
-                  <th className="px-4 py-3 font-semibold">Estudiante</th>
-                  <th className="px-4 py-3 text-center font-semibold">Entregó</th>
-                  <th className="px-4 py-3 text-center font-semibold">Aciertos</th>
-                  <th className="px-4 py-3 text-center font-semibold">Errores</th>
-                  <th className="px-4 py-3 text-center font-semibold">Blancos</th>
-                  <th className="px-4 py-3 text-center font-semibold">Puntaje</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {revision.filas.map((f) => (
-                  <tr key={f.dni}>
-                    <td className="px-4 py-3">
-                      <span className="block text-base font-bold text-slate-900">{f.nombres}</span>
-                      <span className="block text-base text-slate-500">
-                        {f.dni} · CAT. {f.categoria}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-center text-base">
-                      {f.horaEntrega || <span className="text-amber-700">—</span>}
-                      {f.minutos !== null && (
-                        <span className="block text-base text-slate-500">{f.minutos} min</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-center text-base text-emerald-700">
-                      {f.correctas}
-                    </td>
-                    <td className="px-4 py-3 text-center text-base text-slate-500">
-                      {f.incorrectas}
-                    </td>
-                    <td className="px-4 py-3 text-center text-base text-slate-500">{f.blancos}</td>
-                    <td className="px-4 py-3 text-center text-xl font-black text-granate-700">
-                      {f.puntaje}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <TablaDelActa filas={revision.filas} />
+
+          {revision.errores.length === 0 && (
+            <div className="mt-6 flex justify-end">
+              <Boton variante="exito" cargando={procesando === 'enviar'} onClick={enviar}>
+                <Send className="h-6 w-6" />
+                Entregar respuestas
+              </Boton>
+            </div>
+          )}
         </Tarjeta>
       )}
+    </div>
+  );
+}
+
+/**
+ * La banda de subir: grande y a rayas, que es lo primero que hay que
+ * encontrar el día del examen y con prisa nadie busca un botón pequeño.
+ */
+function BandaSubir({ cargando, encima, setEncima, alElegir, alSoltar }) {
+  const rayas = encima
+    ? 'repeating-linear-gradient(135deg, #D3EADD 0 16px, #ECF6F0 16px 32px)'
+    : 'repeating-linear-gradient(135deg, #ECF6F0 0 16px, #FFFFFF 16px 32px)';
+
+  const soltar = (e) => {
+    e.preventDefault();
+    setEncima(false);
+    const archivo = e.dataTransfer?.files?.[0];
+    if (archivo) alSoltar(archivo);
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={alElegir}
+      disabled={cargando}
+      onDragOver={(e) => {
+        e.preventDefault();
+        setEncima(true);
+      }}
+      onDragLeave={() => setEncima(false)}
+      onDrop={soltar}
+      style={{ backgroundImage: rayas }}
+      className={`mt-6 flex w-full flex-col items-center justify-center gap-2 rounded-3xl border-4 border-dashed py-10 transition disabled:opacity-60 ${
+        encima ? 'border-excel-600 scale-[1.01]' : 'border-excel-600/40 hover:border-excel-600'
+      }`}
+    >
+      <span className="flex items-center gap-4 text-3xl font-black uppercase tracking-[0.2em] text-excel-700">
+        <Upload className={`h-9 w-9 ${cargando ? 'animate-saltar' : ''}`} />
+        {cargando ? 'Leyendo el acta…' : 'Subir Excel'}
+      </span>
+      <span className="text-base font-semibold text-excel-600">
+        Toque aquí o arrastre el archivo · solo .xlsx
+      </span>
+    </button>
+  );
+}
+
+/**
+ * El mismo color que pinta el Excel al escribir la respuesta.
+ *
+ * Están repetidos a propósito en los dos sitios —aquí y en el servicio que
+ * arma el acta— porque son dos lenguajes distintos; lo que no puede pasar es
+ * que no coincidan: el responsable acaba de ver esos colores en su hoja.
+ */
+const COLOR_CASILLA = {
+  A: 'bg-blue-100 text-blue-900',
+  B: 'bg-green-100 text-green-900',
+  C: 'bg-amber-100 text-amber-900',
+  D: 'bg-purple-100 text-purple-900',
+  E: 'bg-rose-100 text-rose-900',
+  BLANCO: 'bg-slate-200 text-slate-500',
+};
+
+/**
+ * Lo subido, con la misma forma que el Excel: una fila por alumno y una
+ * columna por pregunta, numeradas igual.
+ *
+ * Sin aciertos ni puntaje. El responsable de aula transcribe lo que marcó el
+ * chico; si ve la nota antes de entregar, acaba corrigiendo el acta en vez de
+ * copiarla.
+ */
+function TablaDelActa({ filas }) {
+  if (filas.length === 0) return null;
+
+  const alternativas = filas[0].alternativas?.length || 0;
+  const numericas = filas[0].numericas?.length || 0;
+
+  const th = 'px-2 py-2 text-center text-base font-bold';
+
+  return (
+    <div className="mt-6 overflow-x-auto rounded-2xl border-2 border-slate-200">
+      <table className="w-full border-collapse whitespace-nowrap">
+        <thead>
+          <tr className="bg-granate-600 text-white">
+            <th className={`${th} w-12`}>N°</th>
+            <th className={`${th} text-left`}>DNI</th>
+            <th className={`${th} text-left`}>APELLIDOS Y NOMBRES</th>
+            <th className={th}>CAT.</th>
+            {Array.from({ length: alternativas }, (_, i) => (
+              <th key={`a${i}`} className={`${th} w-9`}>
+                {i + 1}
+              </th>
+            ))}
+            {Array.from({ length: numericas }, (_, i) => (
+              <th key={`n${i}`} className={`${th} w-12 bg-granate-700`}>
+                {alternativas + i + 1}
+              </th>
+            ))}
+            <th className={th}>HORA</th>
+          </tr>
+        </thead>
+        <tbody>
+          {filas.map((f, fila) => (
+            <tr key={f.dni} className={fila % 2 ? 'bg-slate-50' : 'bg-white'}>
+              <td className="px-2 py-2 text-center text-base text-slate-500">{fila + 1}</td>
+              <td className="px-2 py-2 text-base text-slate-600">{f.dni}</td>
+              <td className="px-2 py-2 text-base font-bold text-slate-900">{f.nombres}</td>
+              <td className="px-2 py-2 text-center text-base font-semibold text-slate-700">
+                {f.categoria}
+              </td>
+
+              {(f.alternativas || []).map((r, i) => (
+                <td key={`a${i}`} className="p-0.5">
+                  <span
+                    className={`flex h-8 items-center justify-center rounded text-base font-black ${
+                      COLOR_CASILLA[r] || 'bg-slate-100 text-slate-300'
+                    }`}
+                  >
+                    {r === 'BLANCO' ? '–' : r}
+                  </span>
+                </td>
+              ))}
+
+              {(f.numericas || []).map((r, i) => (
+                <td key={`n${i}`} className="p-0.5">
+                  <span
+                    className={`flex h-8 items-center justify-center rounded px-1 text-base font-black ${
+                      r ? 'bg-emerald-100 text-emerald-900' : 'bg-slate-100 text-slate-300'
+                    }`}
+                  >
+                    {r || '–'}
+                  </span>
+                </td>
+              ))}
+
+              <td className="px-2 py-2 text-center text-base">
+                {f.horaEntrega || <span className="font-semibold text-amber-700">—</span>}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/** Granate bebé a naranja bebé: el mismo fondo de la premiación. */
+const FONDO_SELLO =
+  'linear-gradient(135deg, #FDF3F5 0%, #FBE4E8 28%, #F7D9D4 52%, #FFE6CE 78%, #FFD6AE 100%)';
+
+/**
+ * La ventana de entregado: el disco llega girando sobre su eje y el visto se
+ * dibuja solo encima.
+ *
+ * Sale por delante de todo a propósito. Es el único momento del día en que el
+ * responsable sabe que ya terminó con su aula, y un avisito en un rincón se
+ * pasa por alto justo cuando no hay que pasarlo por alto.
+ */
+function SelloEntregado({ entregado, salon, alCerrar }) {
+  useEffect(() => {
+    const tecla = (e) => e.key === 'Escape' && alCerrar();
+    window.addEventListener('keydown', tecla);
+    const antes = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      window.removeEventListener('keydown', tecla);
+      document.body.style.overflow = antes;
+    };
+  }, [alCerrar]);
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      onClick={alCerrar}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-granate-900/45 p-6 backdrop-blur-sm"
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{ background: FONDO_SELLO, perspective: '900px' }}
+        className="animate-emerger relative w-full max-w-xl overflow-hidden rounded-[2.5rem] p-10 text-center shadow-[0_40px_90px_-20px_rgba(123,30,43,0.55)]"
+      >
+        <div className="pointer-events-none absolute -left-24 -top-24 h-72 w-72 animate-respirar rounded-full bg-granate-200/70 blur-3xl" />
+        <div
+          className="pointer-events-none absolute -bottom-28 -right-20 h-80 w-80 animate-respirar rounded-full bg-orange-200/70 blur-3xl"
+          style={{ animationDelay: '1.2s' }}
+        />
+
+        <div className="relative mx-auto h-36 w-36" style={{ transformStyle: 'preserve-3d' }}>
+          <span className="absolute inset-0 animate-radar rounded-full bg-granate-300/70" />
+          <div
+            className="absolute inset-0 animate-girarCheck rounded-full bg-gradient-to-br from-granate-500 via-granate-600 to-granate-800 p-7 shadow-[0_26px_50px_-14px_rgba(123,30,43,0.8)] ring-4 ring-white/70"
+            style={{ transformStyle: 'preserve-3d' }}
+          >
+            <svg viewBox="0 0 48 48" className="h-full w-full">
+              <path
+                d="M12 25 l9 9 l15 -18"
+                fill="none"
+                stroke="white"
+                strokeWidth="6"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="animate-trazarCheck"
+                style={{ strokeDasharray: 40 }}
+              />
+            </svg>
+          </div>
+        </div>
+
+        <h4 className="relative mt-8 text-4xl font-black uppercase tracking-tight text-granate-700">
+          Respuestas entregadas
+        </h4>
+        <p className="relative mx-auto mt-3 max-w-md text-xl text-granate-800">
+          El acta del <strong>salón {salon.numero}</strong> quedó registrada con{' '}
+          <strong>{entregado.total}</strong> {entregado.total === 1 ? 'alumno' : 'alumnos'}.
+        </p>
+
+        {(entregado.ausentes > 0 || entregado.sinHora > 0) && (
+          <p className="relative mt-3 text-base font-semibold text-granate-600">
+            {entregado.ausentes > 0 && `${entregado.ausentes} sin presentarse`}
+            {entregado.ausentes > 0 && entregado.sinHora > 0 && ' · '}
+            {entregado.sinHora > 0 && `${entregado.sinHora} sin hora de entrega`}.
+          </p>
+        )}
+
+        <p className="relative mt-6 text-base text-granate-700/80">
+          Si se equivocó en algo, avise a la comisión: ellos anulan el envío y usted vuelve a
+          subirla.
+        </p>
+
+        <div className="relative mt-7">
+          <Boton onClick={alCerrar}>Listo</Boton>
+        </div>
+      </div>
     </div>
   );
 }

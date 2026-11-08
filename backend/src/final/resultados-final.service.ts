@@ -1,7 +1,8 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import * as ExcelJS from 'exceljs';
+import { Modalidad } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { ExamenFinalService } from './examen-final.service';
+import { CorregidoFinal, ExamenFinalService } from './examen-final.service';
 import { GRADOS } from '../common/grados';
 import { GRANATE, escribirEncabezados, escribirTitulo, nombreArchivo } from '../common/excel';
 
@@ -11,6 +12,47 @@ const CLAVE = 'resultados_final_config';
 const PODIOS = 10;
 
 const TITULO_POR_DEFECTO = 'RESULTADOS DE LA FINAL MACRORREGIONAL';
+
+/** Lo que se proyecta debajo del lugar, en todas las láminas. */
+const NOMBRE_CONCURSO = 'I OMASUR UNI 2026';
+
+/** Los lugares que se llaman al estrado, del décimo al primero. */
+const LUGARES = 10;
+
+/** El nombre de cada lugar, para el titular de la lámina. */
+const ORDINALES = [
+  '',
+  'PRIMER',
+  'SEGUNDO',
+  'TERCER',
+  'CUARTO',
+  'QUINTO',
+  'SEXTO',
+  'SÉPTIMO',
+  'OCTAVO',
+  'NOVENO',
+  'DÉCIMO',
+];
+
+/**
+ * Los dos ámbitos de la premiación, en el orden en que se proyectan.
+ *
+ * Estatales y particulares no compiten por el mismo premio, así que cada uno
+ * tiene su tabla y su décimo lugar. La tabla que los mezcla no está aquí: esa
+ * es la de siempre y vive en Resultados finales, que es donde se consulta,
+ * no en el acto, donde se premia.
+ */
+const AMBITOS = [
+  {
+    id: 'PRIVADO',
+    texto: 'Privado',
+    detalle: 'Colegios particulares y grupos de estudio.',
+  },
+  { id: 'PUBLICO', texto: 'Público', detalle: 'Colegios estatales.' },
+] as const;
+
+/** Dónde compite una delegación. El general no es de nadie: es la suma. */
+export type Ambito = 'PRIVADO' | 'PUBLICO';
 
 export interface ConfigResultadosFinal {
   /** Abre los resultados en la cuenta de cada tutor. */
@@ -51,6 +93,9 @@ export interface PuestoFinal {
   minutos: number | null;
   /** Mismo puntaje y mismo tiempo que otro: comparten el puesto. */
   empatado: boolean;
+  /** La modalidad de su institución y el ámbito en que se le premia. */
+  modalidad: Modalidad;
+  ambito: Ambito;
 }
 
 /**
@@ -148,7 +193,39 @@ export class ResultadosFinalService {
    * la sede, no para que compitan por aula.
    */
   async calcular(): Promise<PuestoFinal[]> {
-    const todas = await this.examen.todas();
+    const [todas, modalidades] = await Promise.all([this.examen.todas(), this.modalidades()]);
+    return this.ordenar(todas, modalidades);
+  }
+
+  /** La modalidad de cada delegación, en una sola consulta. */
+  private async modalidades(): Promise<Map<string, Modalidad>> {
+    const tutores = await this.prisma.tutor.findMany({ select: { id: true, modalidad: true } });
+    return new Map(tutores.map((t) => [t.id, t.modalidad]));
+  }
+
+  /**
+   * El ámbito en que compite una delegación.
+   *
+   * Los grupos de estudio van con los particulares: no son un colegio del
+   * Estado. Si la delegación no apareciera, cuenta como pública, que es lo
+   * que dice su ficha por defecto.
+   */
+  private ambitoDe(modalidad: Modalidad | undefined): Ambito {
+    return modalidad === 'PARTICULAR' || modalidad === 'GRUPO_ESTUDIO' ? 'PRIVADO' : 'PUBLICO';
+  }
+
+  /**
+   * Reparte los puestos dentro de cada categoría, sobre el conjunto que se le
+   * dé.
+   *
+   * Va aparte de `calcular` porque la premiación por ámbito necesita el mismo
+   * orden aplicado solo a los privados o solo a los públicos: el décimo de los
+   * privados no es el décimo de la tabla general.
+   */
+  private ordenar(
+    todas: (CorregidoFinal & { salon: number })[],
+    modalidades: Map<string, Modalidad>,
+  ): PuestoFinal[] {
     const lista: PuestoFinal[] = [];
     const tiempo = (m: number | null) => (m === null ? Infinity : m);
 
@@ -185,6 +262,8 @@ export class ResultadosFinalService {
           horaEntrega: f.horaEntrega,
           minutos: f.minutos,
           empatado,
+          modalidad: modalidades.get(f.tutorId) ?? 'ESTATAL',
+          ambito: this.ambitoDe(modalidades.get(f.tutorId)),
         });
       });
     }
@@ -276,6 +355,497 @@ export class ResultadosFinalService {
     }
 
     return { puestos, totalPuestos: cuantos };
+  }
+
+  /**
+   * La misma premiación, armada para proyectarla en pantalla grande.
+   *
+   * Una lámina por lugar y ámbito, del décimo al primero y dentro de cada
+   * lugar primero el privado y después el público: ese es el orden en que se
+   * llama al estrado. Son siempre los diez lugares y las veinte láminas,
+   * estén llenas o no, porque el menú de la presentación es fijo y una lámina
+   * que desaparece a mitad del acto desordena a quien la está pasando; la que
+   * no tiene a nadie viene marcada para que la pantalla lo diga.
+   */
+  async presentacion() {
+    const [todas, modalidades, config, consolidado] = await Promise.all([
+      this.examen.todas(),
+      this.modalidades(),
+      this.config(),
+      this.examen.consolidado(),
+    ]);
+
+    const solo = (ambito: Ambito) =>
+      todas.filter((f) => this.ambitoDe(modalidades.get(f.tutorId)) === ambito);
+
+    const tablas: Record<string, PuestoFinal[]> = {
+      PRIVADO: this.ordenar(solo('PRIVADO'), modalidades),
+      PUBLICO: this.ordenar(solo('PUBLICO'), modalidades),
+    };
+
+    const laminas = [];
+    for (let puesto = LUGARES; puesto >= 1; puesto--) {
+      for (const ambito of AMBITOS) {
+        const suyos = tablas[ambito.id].filter((r) => r.puesto === puesto);
+
+        const categorias = GRADOS.map((g) => {
+          const alumnos = suyos
+            .filter((r) => r.categoria === g.categoria)
+            .sort((a, b) => a.nombres.localeCompare(b.nombres, 'es'))
+            .map((r) => ({
+              dni: r.dni,
+              nombres: r.nombres,
+              institucion: r.institucion,
+              puntaje: r.puntaje,
+              empatado: r.empatado,
+            }));
+          if (alumnos.length === 0) return null;
+          return { categoria: g.categoria, grado: g.label, nivel: g.nivel, alumnos };
+        }).filter(Boolean);
+
+        laminas.push({
+          id: `${puesto}-${ambito.id.toLowerCase()}`,
+          puesto,
+          ambito: ambito.id,
+          ambitoTexto: ambito.texto,
+          // El ámbito no entra en el titular: ya va en su propia etiqueta,
+          // justo encima, y repetido dos veces en la misma lámina sobra.
+          titulo: `${ORDINALES[puesto]} LUGAR`,
+          subtitulo: NOMBRE_CONCURSO,
+          detalle: ambito.detalle,
+          categorias,
+          premiados: categorias.reduce((n, c) => n + c.alumnos.length, 0),
+        });
+      }
+    }
+
+    return {
+      lugares: LUGARES,
+      ambitos: AMBITOS,
+      laminas,
+      resumen: {
+        rindieron: todas.length,
+        privados: tablas.PRIVADO.length,
+        publicos: tablas.PUBLICO.length,
+        // Mientras falte un salón por entregar, los puestos todavía se mueven.
+        salonesPendientes: consolidado.resumen.pendientes,
+        completo: consolidado.resumen.salones > 0 && consolidado.resumen.pendientes === 0,
+      },
+      publicado: config.publicado,
+    };
+  }
+
+  // ------------------------------------------------------------- el consolidado
+
+  /** Un alumno como lo lee el consolidado: sin la hoja de respuestas detrás. */
+  private ficha(r: PuestoFinal) {
+    return {
+      dni: r.dni,
+      nombres: r.nombres,
+      institucion: r.institucion,
+      ambito: r.ambito,
+      ambitoTexto: r.ambito === 'PRIVADO' ? 'Privado' : 'Público',
+      categoria: r.categoria,
+      grado: r.grado,
+      /** Su puesto dentro de su categoría, que es por donde se premia. */
+      puesto: r.puesto,
+      puntaje: r.puntaje,
+    };
+  }
+
+  /**
+   * La tabla por puntaje a secas, sin separar categorías.
+   *
+   * El puesto de la premiación es dentro de la categoría —un tercero de
+   * primaria no compite contra un quinto de secundaria—, pero para saber
+   * quién hizo el mejor examen del día hay que mirarlos a todos juntos, y esa
+   * es otra tabla.
+   */
+  private porPuntaje(lista: PuestoFinal[]) {
+    const tiempo = (m: number | null) => (m === null ? Infinity : m);
+    const orden = [...lista].sort(
+      (a, b) =>
+        b.puntaje - a.puntaje ||
+        tiempo(a.minutos) - tiempo(b.minutos) ||
+        a.nombres.localeCompare(b.nombres, 'es'),
+    );
+    const igual = (x: PuestoFinal, y: PuestoFinal) =>
+      x.puntaje === y.puntaje && tiempo(x.minutos) === tiempo(y.minutos);
+
+    return orden.map((r) => ({
+      ...this.ficha(r),
+      posicion: orden.findIndex((x) => igual(x, r)) + 1,
+      empatado: orden.filter((x) => igual(x, r)).length > 1,
+    }));
+  }
+
+  /**
+   * El consolidado de la final: todo lo que se pregunta después del acto.
+   *
+   * Quién hizo el mejor examen del día, quién el de cada categoría, cómo
+   * quedaron estatales y particulares por separado, y qué colegio se lleva el
+   * día. Nada de esto se guarda: sale de los mismos puntajes que la
+   * premiación, así que corregir una clave lo arrastra entero.
+   */
+  async consolidado() {
+    const [lista, consolidadoExamen] = await Promise.all([
+      this.calcular(),
+      this.examen.consolidado(),
+    ]);
+
+    const media = (xs: number[]) =>
+      xs.length ? Math.round((xs.reduce((a, b) => a + b, 0) / xs.length) * 100) / 100 : 0;
+
+    // Con empate en el décimo entran los dos: cortar por el número de filas
+    // dejaría fuera a alguien con el mismo puntaje que el que sí entró.
+    const diez = (suyos: PuestoFinal[]) =>
+      this.porPuntaje(suyos).filter((r) => r.posicion <= 10);
+
+    const deAmbito = (id: Ambito) => {
+      const suyos = lista.filter((r) => r.ambito === id);
+      const tabla = this.porPuntaje(suyos);
+      return {
+        id,
+        texto: AMBITOS.find((a) => a.id === id)!.texto,
+        detalle: AMBITOS.find((a) => a.id === id)!.detalle,
+        rindieron: suyos.length,
+        instituciones: new Set(suyos.map((r) => r.tutorId)).size,
+        promedio: media(suyos.map((r) => r.puntaje)),
+        mejor: tabla[0] || null,
+      };
+    };
+
+    // ------------------------------------------------------ por categoría
+    const categorias = GRADOS.map((g) => {
+      const suyos = lista.filter((r) => r.categoria === g.categoria);
+      if (suyos.length === 0) return null;
+
+      // `calcular` ya devuelve cada categoría ordenada, así que el primero de
+      // cada recorte es el mejor: no hace falta volver a ordenar.
+      const privados = suyos.filter((r) => r.ambito === 'PRIVADO');
+      const publicos = suyos.filter((r) => r.ambito === 'PUBLICO');
+
+      return {
+        categoria: g.categoria,
+        grado: g.label,
+        nivel: g.nivel,
+        rindieron: suyos.length,
+        promedio: media(suyos.map((r) => r.puntaje)),
+        mejor: this.ficha(suyos[0]),
+        mejorPrivado: privados.length ? this.ficha(privados[0]) : null,
+        mejorPublico: publicos.length ? this.ficha(publicos[0]) : null,
+      };
+    }).filter(Boolean);
+
+    // --------------------------------------------------------- por colegio
+    const porColegio = new Map<string, PuestoFinal[]>();
+    for (const r of lista) {
+      const clave = r.tutorId || r.institucion;
+      if (!porColegio.has(clave)) porColegio.set(clave, []);
+      porColegio.get(clave)!.push(r);
+    }
+
+    const colegios = [...porColegio.values()]
+      .map((suyos) => {
+        const mejor = suyos.reduce((a, b) => (b.puntaje > a.puntaje ? b : a));
+        return {
+          institucion: suyos[0].institucion || 'Sin nombre',
+          ambito: suyos[0].ambito,
+          ambitoTexto: suyos[0].ambito === 'PRIVADO' ? 'Privado' : 'Público',
+          rindieron: suyos.length,
+          mejor: mejor.puntaje,
+          mejorAlumno: mejor.nombres,
+          mejorCategoria: mejor.categoria,
+          promedio: media(suyos.map((r) => r.puntaje)),
+          total: suyos.reduce((n, r) => n + r.puntaje, 0),
+          enPodio: suyos.filter((r) => r.puesto <= 3).length,
+        };
+      })
+      .sort(
+        (a, b) =>
+          b.mejor - a.mejor ||
+          b.promedio - a.promedio ||
+          a.institucion.localeCompare(b.institucion, 'es'),
+      );
+
+    /**
+     * Tres maneras de ser «el colegio con mayor puntaje», y las tres valen
+     * según lo que se quiera mirar: el mejor examen, el conjunto más parejo o
+     * el que más suma. Se dan las tres antes que elegir una por nadie.
+     */
+    const cima = (clave: 'mejor' | 'promedio' | 'total') =>
+      colegios.length ? [...colegios].sort((a, b) => b[clave] - a[clave])[0] : null;
+
+    const tablaGeneral = this.porPuntaje(lista);
+
+    return {
+      resumen: {
+        rindieron: lista.length,
+        delegaciones: new Set(lista.map((r) => r.tutorId)).size,
+        categorias: categorias.length,
+        promedio: media(lista.map((r) => r.puntaje)),
+        // Mientras falte un salón por entregar, todo esto todavía se mueve.
+        salonesPendientes: consolidadoExamen.resumen.pendientes,
+        completo:
+          consolidadoExamen.resumen.salones > 0 && consolidadoExamen.resumen.pendientes === 0,
+      },
+      mejorGeneral: tablaGeneral[0] || null,
+      ambitos: [deAmbito('PRIVADO'), deAmbito('PUBLICO')],
+      top: {
+        general: diez(lista),
+        privado: diez(lista.filter((r) => r.ambito === 'PRIVADO')),
+        publico: diez(lista.filter((r) => r.ambito === 'PUBLICO')),
+      },
+      categorias,
+      colegios,
+      destacados: {
+        mejorPuntaje: cima('mejor'),
+        mejorPromedio: cima('promedio'),
+        masPuntos: cima('total'),
+      },
+    };
+  }
+
+  /** El mismo consolidado en Excel, una hoja por pregunta. */
+  async excelConsolidado(): Promise<{ buffer: Buffer; nombre: string }> {
+    const datos = await this.consolidado();
+    const libro = new ExcelJS.Workbook();
+    libro.creator = NOMBRE_CONCURSO;
+
+    const cuando = datos.resumen.completo
+      ? 'Con todas las actas recibidas'
+      : `Faltan ${datos.resumen.salonesPendientes} salón(es) por entregar`;
+
+    // ------------------------------------------------------------- resumen
+    const resumen = libro.addWorksheet('RESUMEN');
+    escribirTitulo(
+      resumen,
+      4,
+      'Consolidado de la final macrorregional',
+      cuando,
+      datos.resumen.rindieron,
+    );
+    escribirEncabezados(resumen, [
+      { header: 'DATO', width: 34 },
+      { header: 'VALOR', width: 44 },
+      { header: 'DETALLE', width: 34 },
+      { header: 'PUNTAJE', width: 12 },
+    ]);
+
+    const linea = (dato: string, valor: string | number, detalle = '', puntaje: any = '') => {
+      const fila = resumen.addRow([dato, valor, detalle, puntaje]);
+      fila.getCell(1).font = { bold: true };
+      return fila;
+    };
+
+    linea('Rindieron la final', datos.resumen.rindieron);
+    linea('Delegaciones', datos.resumen.delegaciones);
+    linea('Categorías con alumnos', datos.resumen.categorias);
+    linea('Promedio general', datos.resumen.promedio);
+    resumen.addRow([]);
+
+    if (datos.mejorGeneral) {
+      linea(
+        'Mejor puntaje del día',
+        datos.mejorGeneral.nombres,
+        `${datos.mejorGeneral.institucion} · categoría ${datos.mejorGeneral.categoria} · ${datos.mejorGeneral.ambitoTexto}`,
+        datos.mejorGeneral.puntaje,
+      );
+    }
+    for (const a of datos.ambitos) {
+      linea(
+        `Mejor de ${a.texto.toLowerCase()}`,
+        a.mejor ? a.mejor.nombres : '—',
+        a.mejor ? `${a.mejor.institucion} · categoría ${a.mejor.categoria}` : '',
+        a.mejor ? a.mejor.puntaje : '',
+      );
+    }
+    resumen.addRow([]);
+
+    for (const a of datos.ambitos) {
+      linea(
+        `${a.texto}: rindieron`,
+        a.rindieron,
+        `${a.instituciones} institución(es) · promedio ${a.promedio}`,
+      );
+    }
+    resumen.addRow([]);
+
+    const premios: [string, typeof datos.destacados.mejorPuntaje, string][] = [
+      ['Colegio con el mejor puntaje', datos.destacados.mejorPuntaje, 'mejor'],
+      ['Colegio con el mejor promedio', datos.destacados.mejorPromedio, 'promedio'],
+      ['Colegio con más puntos en total', datos.destacados.masPuntos, 'total'],
+    ];
+    for (const [titulo, colegio, clave] of premios) {
+      if (!colegio) continue;
+      linea(
+        titulo,
+        colegio.institucion,
+        `${colegio.ambitoTexto} · ${colegio.rindieron} alumno(s)`,
+        (colegio as any)[clave],
+      );
+    }
+
+    // -------------------------------------------------------------- top 10
+    const hojaTop = libro.addWorksheet('TOP 10');
+    const columnasTop = [
+      { header: 'TABLA', width: 14 },
+      { header: 'POSICIÓN', width: 11 },
+      { header: 'DNI', width: 14 },
+      { header: 'APELLIDOS Y NOMBRES', width: 38 },
+      { header: 'INSTITUCIÓN EDUCATIVA', width: 38 },
+      { header: 'ÁMBITO', width: 12 },
+      { header: 'CAT.', width: 8 },
+      { header: 'GRADO', width: 20 },
+      { header: 'PUNTAJE', width: 11 },
+    ];
+    const tablas = [
+      ['General', datos.top.general],
+      ['Privado', datos.top.privado],
+      ['Público', datos.top.publico],
+    ] as const;
+    escribirTitulo(
+      hojaTop,
+      columnasTop.length,
+      'Los diez primeros de la final',
+      'Por puntaje y sin separar categorías, en las tres tablas',
+      tablas.reduce((n, [, filas]) => n + filas.length, 0),
+    );
+    escribirEncabezados(hojaTop, columnasTop);
+    for (const [nombre, filas] of tablas) {
+      for (const r of filas) {
+        const fila = hojaTop.addRow([
+          nombre,
+          r.posicion + (r.empatado ? ' (empate)' : ''),
+          r.dni,
+          r.nombres,
+          r.institucion,
+          r.ambitoTexto,
+          r.categoria,
+          r.grado,
+          r.puntaje,
+        ]);
+        fila.getCell(3).numFmt = '@';
+        fila.getCell(columnasTop.length).font = { bold: true, color: { argb: GRANATE } };
+        if (r.posicion <= 3) fila.getCell(2).font = { bold: true, color: { argb: 'FFB45309' } };
+      }
+    }
+
+    // -------------------------------------------------------- por categoría
+    const hojaCat = libro.addWorksheet('POR CATEGORÍA');
+    const columnasCat = [
+      { header: 'CAT.', width: 8 },
+      { header: 'GRADO', width: 20 },
+      { header: 'RINDIERON', width: 12 },
+      { header: 'PROMEDIO', width: 11 },
+      { header: 'MEJOR DE LA CATEGORÍA', width: 38 },
+      { header: 'INSTITUCIÓN', width: 34 },
+      { header: 'PTS', width: 9 },
+      { header: 'MEJOR PRIVADO', width: 38 },
+      { header: 'PTS', width: 9 },
+      { header: 'MEJOR PÚBLICO', width: 38 },
+      { header: 'PTS', width: 9 },
+    ];
+    escribirTitulo(
+      hojaCat,
+      columnasCat.length,
+      'El mejor de cada categoría',
+      'El primer puesto de cada categoría, y el primero de cada ámbito dentro de ella',
+      datos.categorias.length,
+    );
+    escribirEncabezados(hojaCat, columnasCat);
+    for (const c of datos.categorias) {
+      hojaCat.addRow([
+        c.categoria,
+        c.grado,
+        c.rindieron,
+        c.promedio,
+        c.mejor.nombres,
+        c.mejor.institucion,
+        c.mejor.puntaje,
+        c.mejorPrivado ? c.mejorPrivado.nombres : '—',
+        c.mejorPrivado ? c.mejorPrivado.puntaje : '',
+        c.mejorPublico ? c.mejorPublico.nombres : '—',
+        c.mejorPublico ? c.mejorPublico.puntaje : '',
+      ]);
+    }
+
+    // ------------------------------------------------------------- colegios
+    const hojaCol = libro.addWorksheet('COLEGIOS');
+    const columnasCol = [
+      { header: 'INSTITUCIÓN EDUCATIVA', width: 40 },
+      { header: 'ÁMBITO', width: 12 },
+      { header: 'RINDIERON', width: 12 },
+      { header: 'MEJOR PUNTAJE', width: 15 },
+      { header: 'SU MEJOR ALUMNO', width: 38 },
+      { header: 'CAT.', width: 8 },
+      { header: 'PROMEDIO', width: 11 },
+      { header: 'PUNTOS EN TOTAL', width: 16 },
+      { header: 'EN EL PODIO', width: 13 },
+    ];
+    escribirTitulo(
+      hojaCol,
+      columnasCol.length,
+      'Las instituciones en la final',
+      'Ordenadas por su mejor puntaje. «En el podio» cuenta sus alumnos entre los tres primeros de alguna categoría',
+      datos.colegios.length,
+    );
+    escribirEncabezados(hojaCol, columnasCol);
+    for (const c of datos.colegios) {
+      const fila = hojaCol.addRow([
+        c.institucion,
+        c.ambitoTexto,
+        c.rindieron,
+        c.mejor,
+        c.mejorAlumno,
+        c.mejorCategoria,
+        c.promedio,
+        c.total,
+        c.enPodio,
+      ]);
+      fila.getCell(4).font = { bold: true, color: { argb: GRANATE } };
+    }
+
+    // ----------------------------------------------------------------- todos
+    const hojaTodos = libro.addWorksheet('TODOS');
+    const columnasTodos = [
+      { header: 'POSICIÓN GENERAL', width: 17 },
+      { header: 'DNI', width: 14 },
+      { header: 'APELLIDOS Y NOMBRES', width: 38 },
+      { header: 'INSTITUCIÓN EDUCATIVA', width: 38 },
+      { header: 'ÁMBITO', width: 12 },
+      { header: 'CAT.', width: 8 },
+      { header: 'GRADO', width: 20 },
+      { header: 'PUESTO EN SU CATEGORÍA', width: 22 },
+      { header: 'PUNTAJE', width: 11 },
+    ];
+    const todos = this.porPuntaje(await this.calcular());
+    escribirTitulo(
+      hojaTodos,
+      columnasTodos.length,
+      'Todos los que rindieron la final',
+      'Por puntaje general; el puesto de la premiación es el de su categoría',
+      todos.length,
+    );
+    escribirEncabezados(hojaTodos, columnasTodos);
+    for (const r of todos) {
+      const fila = hojaTodos.addRow([
+        r.posicion + (r.empatado ? ' (empate)' : ''),
+        r.dni,
+        r.nombres,
+        r.institucion,
+        r.ambitoTexto,
+        r.categoria,
+        r.grado,
+        r.puesto,
+        r.puntaje,
+      ]);
+      fila.getCell(2).numFmt = '@';
+      fila.getCell(columnasTodos.length).font = { bold: true, color: { argb: GRANATE } };
+    }
+
+    const buffer = Buffer.from(await libro.xlsx.writeBuffer());
+    return { buffer, nombre: nombreArchivo('consolidado final macrorregional') };
   }
 
   // ------------------------------------------------------------------- consultas

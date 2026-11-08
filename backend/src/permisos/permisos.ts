@@ -35,7 +35,9 @@ export const PERMISOS_FINAL_RESULTADOS = [
   'final-general',
   'final-top',
   'final-premiacion',
+  'final-presentacion',
   'final-consultar',
+  'final-consolidado',
   'final-publicacion',
 ] as const;
 

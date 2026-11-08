@@ -496,10 +496,31 @@ export class FinalController {
     return this.resultados.premiacion(Number(puestos) || undefined);
   }
 
+  /** La premiación proyectada: una lámina por lugar y ámbito. */
+  @Comision('final-presentacion')
+  @Get('resultados/presentacion')
+  presentacion() {
+    return this.resultados.presentacion();
+  }
+
   @Comision('final-consultar')
   @Get('resultados/buscar')
   buscar(@Query('q') q: string) {
     return this.resultados.buscar(q);
+  }
+
+  /** El consolidado de después del acto: quién, de dónde y cuánto. */
+  @Comision('final-consolidado')
+  @Get('resultados/consolidado')
+  consolidadoFinal() {
+    return this.resultados.consolidado();
+  }
+
+  @Comision('final-consolidado')
+  @Get('resultados/consolidado/excel')
+  async excelConsolidadoFinal(@Res() res: Response) {
+    const { buffer, nombre } = await this.resultados.excelConsolidado();
+    this.enviar(res, buffer, nombre);
   }
 
   @Comision('final-publicacion')
