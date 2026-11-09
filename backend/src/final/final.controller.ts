@@ -116,6 +116,15 @@ export class FinalController {
     return this.resultados.miDelegacion(usuario.sub);
   }
 
+  /** El mismo cuadro en Excel: cada docente se lleva el de su delegación. */
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('TUTOR')
+  @Get('mi-delegacion/excel')
+  async miDelegacionExcel(@CurrentUser() usuario: JwtUser, @Res() res: Response) {
+    const { buffer, nombre } = await this.resultados.miExcel(usuario.sub);
+    this.enviar(res, buffer, nombre);
+  }
+
   /** Los finalistas de su delegación, para saber si hay algo que bajar. */
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('TUTOR')
@@ -508,6 +517,26 @@ export class FinalController {
   @Get('resultados/campeones')
   campeones() {
     return this.resultados.campeones();
+  }
+
+  /** El índice del archivo por categoría y modalidad, para la pantalla. */
+  @Comision('final-presentacion')
+  @Get('resultados/ambitos')
+  cuadroAmbitos() {
+    return this.resultados.cuadroAmbitos();
+  }
+
+  /**
+   * Todo el orden por categoría y modalidad, para descargarlo.
+   *
+   * Sin `ambito` vienen los dos grupos en el mismo libro; con él, solo ese.
+   */
+  @Comision('final-presentacion')
+  @Get('resultados/excel-ambitos')
+  async excelAmbitos(@Query('ambito') ambito: string, @Res() res: Response) {
+    const cual = ambito === 'PUBLICO' || ambito === 'PRIVADO' ? ambito : undefined;
+    const { buffer, nombre } = await this.resultados.excelAmbitos(cual);
+    this.enviar(res, buffer, nombre);
   }
 
   @Comision('final-consultar')

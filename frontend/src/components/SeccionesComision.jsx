@@ -325,6 +325,9 @@ export const SECCION_PRESENTACION_FINAL = {
   permiso: 'final-presentacion',
   hijos: [
     { id: 'final-pres-tablero', texto: 'Tablero del acto', icono: LayoutDashboard },
+    // No se proyecta: es el archivo que se reparte después del acto, con el
+    // orden completo por categoría y por modalidad.
+    { id: 'final-pres-excel', texto: 'Resultados en Excel', icono: FileSpreadsheet },
     ...LUGARES_PRESENTACION.map(({ puesto, texto }) => ({
       id: `final-pres-${puesto}`,
       texto,
@@ -457,6 +460,7 @@ export const TITULOS_COMISION = {
   'final-consolidado': 'Final · Consolidado general',
   'final-publicacion': 'Final · Publicación y consulta',
   'final-pres-tablero': 'Presentación · Tablero del acto',
+  'final-pres-excel': 'Presentación · Resultados en Excel',
   ...Object.fromEntries(
     LUGARES_PRESENTACION.flatMap(({ puesto, texto }) =>
       AMBITOS_PRESENTACION.map((a) => [

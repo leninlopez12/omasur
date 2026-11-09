@@ -6,6 +6,7 @@ import {
   BadgeCheck,
   CheckCircle2,
   CreditCard,
+  Crown,
   FileSpreadsheet,
   Download,
   IdCard,
@@ -34,6 +35,7 @@ import PasoPago, { Confirmado } from '../components/PasoPago.jsx';
 import MisInscripciones from '../components/MisInscripciones.jsx';
 import RespuestasExamen, { AvisoExamen } from '../components/RespuestasExamen.jsx';
 import MiClasificacion, { AvisoClasificados } from '../components/MiClasificacion.jsx';
+import MisResultadosFinal, { AvisoResultadosFinal } from '../components/MisResultadosFinal.jsx';
 import {
   Aviso,
   Boton,
@@ -58,6 +60,9 @@ import {
 } from '../lib/datos';
 
 const SECCIONES = [
+  // Lo último que pasó va arriba: cuando salen los resultados de la final es
+  // lo único que el tutor entra a buscar.
+  { id: 'resultados-final', texto: 'Resultados FINAL macrorregional', icono: Crown },
   { id: 'examen', texto: 'Enviar respuestas del examen', icono: FileSpreadsheet },
   { id: 'clasificacion', texto: 'Clasificados', icono: Trophy },
   { id: 'resumen', texto: 'Resumen', icono: LayoutDashboard },
@@ -74,6 +79,7 @@ const SECCIONES = [
 const SECCIONES_PIE = [{ id: 'datos', texto: 'Mis datos', icono: Settings }];
 
 const TITULOS = {
+  'resultados-final': 'Resultados de la final macrorregional',
   examen: 'Respuestas del examen',
   clasificacion: 'Clasificados de mi delegación',
   resumen: 'Resumen de mi inscripción',
@@ -104,6 +110,8 @@ function Contenido() {
   // La final tiene su propia credencial, y mientras esté abierta es la que
   // importa: las de la institucional ya no sirven para entrar a ninguna parte.
   const [final, setFinal] = useState(null);
+  // Y sus resultados, que salen cuando la comisión los publica después del acto.
+  const [resultadosFinal, setResultadosFinal] = useState(null);
 
   const cargar = useCallback(async () => {
     const { data } = await api.get('/tutores/resumen');
@@ -126,9 +134,17 @@ function Contenido() {
       .get('/final/mis-finalistas')
       .then(({ data }) => setFinal(data))
       .catch(() => setFinal(null));
+
+    api
+      .get('/final/mi-delegacion')
+      .then(({ data }) => setResultadosFinal(data))
+      .catch(() => setResultadosFinal(null));
   }, [cargar]);
 
   const clasificado = Boolean(clasificacion?.publicado);
+  // Publicado y con gente suya dentro: si no llevó finalistas, la sección le
+  // mostraría una tabla vacía.
+  const conResultadosFinal = Boolean(resultadosFinal?.publicado && resultadosFinal.resumen);
   // Abierta y con gente suya dentro: si no lleva finalistas, la sección no le
   // dice nada y no tiene por qué ocuparle sitio.
   const enFinal = Boolean(final?.abierta && final.finalistas?.length);
@@ -140,6 +156,7 @@ function Contenido() {
     (s) =>
       (s.id !== 'examen' || examen?.habilitado) &&
       (s.id !== 'clasificacion' || clasificado) &&
+      (s.id !== 'resultados-final' || conResultadosFinal) &&
       (s.id !== 'credenciales-finalistas' || enFinal) &&
       // Ya estamos en la final: la credencial de la institucional no abre
       // ninguna puerta y solo confundiría al lado de la que sí.
@@ -149,6 +166,7 @@ function Contenido() {
       return { ...s, destacado: Boolean(examen?.abierto && !examen?.entrega) && !clasificado };
     }
     if (s.id === 'clasificacion') return { ...s, destacado: 'verde' };
+    if (s.id === 'resultados-final') return { ...s, destacado: 'verde' };
     if (s.id === 'credenciales-finalistas') return { ...s, destacado: 'verde' };
     return s;
   });
@@ -179,6 +197,12 @@ function Contenido() {
         finalistas={final?.finalistas?.length}
         alIr={() => setSeccion('credenciales-finalistas')}
       />
+      {/* Va última porque es la que manda cuando están las dos: al terminar
+          la final, lo de las credenciales ya pasó. */}
+      <AvisoResultadosFinal
+        datos={resultadosFinal}
+        alIr={() => setSeccion('resultados-final')}
+      />
 
       {!resumen ? (
         <Cargando texto="Cargando su inscripción" />
@@ -206,6 +230,7 @@ function Contenido() {
           {seccion === 'mi-credencial' && <MiCredencial resumen={resumen} final={final} />}
           {seccion === 'examen' && examen?.habilitado && <RespuestasExamen />}
           {seccion === 'clasificacion' && clasificado && <MiClasificacion />}
+          {seccion === 'resultados-final' && <MisResultadosFinal />}
           {seccion === 'historial' && <MisInscripciones />}
           {seccion === 'datos' && <SeccionDatos resumen={resumen} alCambiar={cargar} />}
         </>

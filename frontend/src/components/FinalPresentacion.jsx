@@ -8,6 +8,7 @@ import {
   ClipboardList,
   Crown,
   FastForward,
+  FileSpreadsheet,
   Keyboard,
   Landmark,
   Layers,
@@ -23,7 +24,7 @@ import {
   Users,
 } from 'lucide-react';
 import { Aviso, Boton, Cargando, Selector, Tarjeta } from './Ui.jsx';
-import { api, mensajeError } from '../lib/api';
+import { api, descargar, mensajeError } from '../lib/api';
 
 /** Hasta qué lugar se lanza la serpentina al terminar de nombrar. */
 const PODIO = 3;
@@ -65,6 +66,8 @@ export default function FinalPresentacion({ lamina: pedida, irA }) {
   // El sustento del premio mayor no se proyecta: es una pantalla del panel,
   // sale de otra consulta y no necesita las veintiuna láminas del acto.
   if (pedida === 'campeones-sustento') return <Sustento />;
+  // Las descargas tampoco: son el archivo de después del acto.
+  if (pedida === 'excel') return <Descargas />;
   return <Proyeccion pedida={pedida} irA={irA} />;
 }
 
@@ -1337,6 +1340,194 @@ function TablaCampeonato({ tabla }) {
           </tbody>
         </table>
       </div>
+    </Tarjeta>
+  );
+}
+
+// ------------------------------------------------------- resultados en Excel
+
+/**
+ * Presentación · Resultados en Excel.
+ *
+ * Lo que se reparte cuando el acto termina: el orden completo de cada
+ * categoría, separado en públicos y privados, que es como se premia. Aquí no
+ * se proyecta nada; esta pantalla solo descarga.
+ *
+ * El índice de arriba no es un resultado más: dice cuántas hojas trae el
+ * archivo y con cuánta gente dentro, para que quien lo baja sepa de antemano
+ * si está completo antes de mandarlo por correo a los colegios.
+ */
+function Descargas() {
+  const [datos, setDatos] = useState(null);
+  const [error, setError] = useState('');
+  const [bajando, setBajando] = useState('');
+
+  useEffect(() => {
+    api
+      .get('/final/resultados/ambitos')
+      .then(({ data }) => setDatos(data))
+      .catch((e) => setError(mensajeError(e, 'No se pudo armar el cuadro')));
+  }, []);
+
+  if (error && !datos) {
+    return (
+      <Aviso tipo="error" icono={AlertCircle}>
+        {error}
+      </Aviso>
+    );
+  }
+  if (!datos) return <Cargando texto="Contando los resultados de cada categoría" />;
+
+  const bajar = async (ambito) => {
+    setError('');
+    setBajando(ambito || 'todo');
+    try {
+      await descargar(`/final/resultados/excel-ambitos${ambito ? `?ambito=${ambito}` : ''}`);
+    } catch (e) {
+      setError(mensajeError(e, 'No se pudo descargar'));
+    } finally {
+      setBajando('');
+    }
+  };
+
+  const { resumen } = datos;
+
+  if (resumen.rindieron === 0) {
+    return (
+      <Tarjeta>
+        <h3 className="text-3xl font-black text-slate-900">Resultados en Excel</h3>
+        <div className="mt-6">
+          <Aviso tipo="info" icono={AlertCircle} compacto>
+            Todavía no hay respuestas de la final. En cuanto los responsables suban las actas de
+            sus salones, el archivo se puede descargar desde aquí.
+          </Aviso>
+        </div>
+      </Tarjeta>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <Tarjeta>
+        <h3 className="flex items-center gap-3 text-3xl font-black text-slate-900">
+          <FileSpreadsheet className="h-9 w-9 text-excel-600" />
+          Resultados en Excel
+        </h3>
+        <p className="mt-2 max-w-4xl text-xl text-slate-600">
+          Todo el orden de la final por categoría y por modalidad: una hoja por cada categoría
+          dentro de los públicos y otra dentro de los privados —los grupos de estudio van con los
+          privados—, más una hoja con todos para filtrar a mano. Cada fila lleva su puesto en su
+          ámbito y el puesto que se nombró en el acto, para que los dos números se puedan leer sin
+          confundirlos.
+        </p>
+
+        <div className="mt-7 grid gap-4 sm:grid-cols-3">
+          <Cifra icono={Users} valor={resumen.rindieron} texto="Rindieron la final" />
+          <Cifra icono={Layers} valor={resumen.hojas} texto="Hojas trae el archivo completo" />
+          <Cifra icono={Medal} valor={datos.puestos} texto="Puestos se premian por categoría" />
+        </div>
+
+        {resumen.salonesPendientes > 0 && (
+          <div className="mt-6">
+            <Aviso tipo="alerta" icono={AlertCircle} compacto titulo="Todavía faltan actas">
+              Quedan {resumen.salonesPendientes} salón(es) por entregar. Lo que se baje ahora
+              puede cambiar cuando lleguen, así que conviene esperar antes de repartirlo.
+            </Aviso>
+          </div>
+        )}
+
+        {error && (
+          <div className="mt-5">
+            <Aviso tipo="error" icono={AlertCircle} compacto>
+              {error}
+            </Aviso>
+          </div>
+        )}
+
+        <div className="mt-7 flex flex-wrap gap-4">
+          <Boton variante="excel" onClick={() => bajar('')} cargando={bajando === 'todo'}>
+            <FileSpreadsheet className="h-6 w-6" />
+            Todo · por categoría y modalidad
+          </Boton>
+          <Boton
+            variante="excelContorno"
+            onClick={() => bajar('PUBLICO')}
+            cargando={bajando === 'PUBLICO'}
+          >
+            <Landmark className="h-6 w-6" />
+            Solo los públicos
+          </Boton>
+          <Boton
+            variante="excelContorno"
+            onClick={() => bajar('PRIVADO')}
+            cargando={bajando === 'PRIVADO'}
+          >
+            <Building2 className="h-6 w-6" />
+            Solo los privados
+          </Boton>
+        </div>
+      </Tarjeta>
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        {datos.ambitos.map((a) => (
+          <HojasDelAmbito key={a.id} ambito={a} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** Lo que trae el archivo de un ámbito, categoría por categoría. */
+function HojasDelAmbito({ ambito }) {
+  const Icono = ambito.id === 'PUBLICO' ? Landmark : Building2;
+
+  return (
+    <Tarjeta className="p-6">
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex items-start gap-3">
+          <Icono className="h-7 w-7 shrink-0 text-granate-600" />
+          <div>
+            <h4 className="text-xl font-black text-slate-900">{ambito.texto}</h4>
+            <p className="mt-1 text-base text-slate-600">{ambito.detalle}</p>
+          </div>
+        </div>
+        <span className="shrink-0 text-2xl font-black text-granate-700">{ambito.total}</span>
+      </div>
+
+      {ambito.categorias.length === 0 ? (
+        <p className="mt-5 rounded-xl bg-slate-50 px-4 py-3 text-base text-slate-600">
+          Nadie de este ámbito rindió la final.
+        </p>
+      ) : (
+        <div className="mt-5 overflow-hidden rounded-xl border-2 border-slate-200">
+          <table className="w-full text-left">
+            <thead className="bg-slate-50">
+              <tr className="text-base text-slate-500">
+                <th className="px-4 py-2.5 font-semibold">Hoja</th>
+                <th className="px-4 py-2.5 font-semibold">Grado</th>
+                <th className="px-4 py-2.5 text-center font-semibold">Estudiantes</th>
+                <th className="px-4 py-2.5 text-center font-semibold">Mejor puntaje</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {ambito.categorias.map((c) => (
+                <tr key={c.categoria}>
+                  <td className="px-4 py-2.5 text-base font-black text-granate-700">
+                    CAT. {c.categoria}
+                  </td>
+                  <td className="px-4 py-2.5 text-base text-slate-600">{c.grado}</td>
+                  <td className="px-4 py-2.5 text-center text-base font-bold text-slate-900">
+                    {c.total}
+                  </td>
+                  <td className="px-4 py-2.5 text-center text-base font-bold text-granate-700">
+                    {c.mejor}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </Tarjeta>
   );
 }

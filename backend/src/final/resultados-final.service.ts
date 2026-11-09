@@ -55,6 +55,9 @@ const AMBITOS = [
 /** Dónde compite una delegación. El general no es de nadie: es la suma. */
 export type Ambito = 'PRIVADO' | 'PUBLICO';
 
+/** Cómo se nombra al grupo entero, para los títulos y los archivos. */
+const AMBITO_PLURAL: Record<Ambito, string> = { PRIVADO: 'privados', PUBLICO: 'públicos' };
+
 /** Cómo se nombra la modalidad de una institución en la premiación. */
 const MODALIDAD_TEXTO: Record<Modalidad, string> = {
   ESTATAL: 'Pública',
@@ -1246,33 +1249,130 @@ export class ResultadosFinalService {
     });
   }
 
-  /** Lo que ve el tutor en su cuenta, cuando ya está publicado. */
+  /**
+   * Un alumno con sus dos puestos, que es como se informa fuera del acto.
+   *
+   * El puesto que se premia y el que vienen a preguntar no son el mismo
+   * número: en el acto compiten todos los de la categoría, pero el tutor y
+   * el alumno quieren saber cómo les fue entre los colegios que son como el
+   * suyo. Van los dos, cada uno con de cuántos sale, para que nadie los
+   * confunda al leerlos.
+   */
+  private fichaDe(
+    general: PuestoFinal[],
+    porAmbito: Map<string, PuestoFinal>,
+    premiaHasta: number,
+  ) {
+    const enCategoria = new Map<string, number>();
+    const enGrupo = new Map<string, number>();
+    for (const r of general) {
+      enCategoria.set(r.categoria, (enCategoria.get(r.categoria) || 0) + 1);
+      const grupo = `${r.categoria}-${r.ambito}`;
+      enGrupo.set(grupo, (enGrupo.get(grupo) || 0) + 1);
+    }
+
+    return (r: PuestoFinal) => {
+      const enAmbito = porAmbito.get(`${r.dni}-${r.categoria}`);
+
+      return {
+        dni: r.dni,
+        nombres: r.nombres,
+        institucion: r.institucion,
+        tutorId: r.tutorId,
+        categoria: r.categoria,
+        grado: r.grado,
+        salon: r.salon,
+        correctas: r.correctas,
+        incorrectas: r.incorrectas,
+        blancos: r.blancos,
+        puntaje: r.puntaje,
+        horaEntrega: r.horaEntrega,
+        minutos: r.minutos,
+        /** Entre todos los de su categoría: el puesto del acto. */
+        puesto: r.puesto,
+        empatado: r.empatado,
+        rindieron: enCategoria.get(r.categoria) || 0,
+        /** Y entre los de su mismo ámbito, que es con quienes se compara. */
+        ambito: r.ambito,
+        ambitoTexto: r.ambito === 'PRIVADO' ? 'Privado' : 'Público',
+        modalidad: r.modalidad,
+        modalidadTexto: MODALIDAD_TEXTO[r.modalidad],
+        puestoAmbito: enAmbito?.puesto ?? r.puesto,
+        empatadoAmbito: enAmbito?.empatado ?? r.empatado,
+        rindieronAmbito: enGrupo.get(`${r.categoria}-${r.ambito}`) || 0,
+        premiado: r.puesto <= premiaHasta,
+      };
+    };
+  }
+
+  /**
+   * Lo que ve el tutor en su cuenta, cuando ya está publicado.
+   *
+   * Sus finalistas con el puntaje y los dos puestos, agrupados por categoría
+   * porque es como compiten. Mientras la comisión no publique no devuelve
+   * nada: el tutor no puede enterarse antes del acto.
+   */
   async miDelegacion(tutorId: string) {
-    const [lista, config] = await Promise.all([this.calcular(), this.config()]);
-    if (!config.publicado) return { publicado: false, categorias: [], resumen: null };
+    const config = await this.config();
 
-    const mios = lista.filter((r) => r.tutorId === tutorId);
-    if (mios.length === 0) return { publicado: true, categorias: [], resumen: null };
+    // La cabecera es la misma esté publicado o no, para que la pantalla no
+    // tenga que preguntarse qué campos existen en cada caso.
+    type Alumno = ReturnType<ReturnType<ResultadosFinalService['fichaDe']>>;
+    const cabecera = {
+      publicado: config.publicado,
+      publicadoEn: config.publicadoEn,
+      titulo: config.tituloPublico,
+      puestos: config.puestos,
+      institucion: '',
+      tutor: '',
+      modalidadTexto: '',
+      ambitoTexto: '',
+      categorias: [] as { categoria: string; grado: string; alumnos: Alumno[] }[],
+      resumen: null as {
+        rindieron: number;
+        premiados: number;
+        categorias: number;
+        mejor: Alumno;
+      } | null,
+    };
 
-    const categorias = [...new Set(mios.map((r) => r.categoria))].sort().map((categoria) => ({
+    if (!config.publicado) return cabecera;
+
+    const [{ general, porAmbito }, delegaciones] = await Promise.all([
+      this.tablas(),
+      this.delegaciones(),
+    ]);
+
+    const mia = delegaciones.get(tutorId);
+    const ficha = this.fichaDe(general, porAmbito, config.puestos);
+    const mios = general.filter((r) => r.tutorId === tutorId).map(ficha);
+
+    cabecera.institucion = mia?.institucion || mios[0]?.institucion || '';
+    cabecera.tutor = mia?.tutor || '';
+    cabecera.modalidadTexto = mia ? MODALIDAD_TEXTO[mia.modalidad] : mios[0]?.modalidadTexto || '';
+    cabecera.ambitoTexto = mia
+      ? this.ambitoDe(mia.modalidad) === 'PRIVADO'
+        ? 'Privado'
+        : 'Público'
+      : mios[0]?.ambitoTexto || '';
+
+    if (mios.length === 0) return cabecera;
+
+    cabecera.categorias = [...new Set(mios.map((r) => r.categoria))].sort().map((categoria) => ({
       categoria,
       grado: GRADOS.find((g) => g.categoria === categoria)?.label || '',
-      alumnos: mios
-        .filter((r) => r.categoria === categoria)
-        .sort((a, b) => a.puesto - b.puesto)
-        .map((r) => ({ ...r, premiado: r.puesto <= config.puestos })),
+      alumnos: mios.filter((r) => r.categoria === categoria).sort((a, b) => a.puesto - b.puesto),
     }));
 
-    return {
-      publicado: true,
-      publicadoEn: config.publicadoEn,
-      categorias,
-      resumen: {
-        rindieron: mios.length,
-        premiados: mios.filter((r) => r.puesto <= config.puestos).length,
-        mejor: [...mios].sort((a, b) => a.puesto - b.puesto)[0],
-      },
+    cabecera.resumen = {
+      rindieron: mios.length,
+      premiados: mios.filter((r) => r.premiado).length,
+      categorias: cabecera.categorias.length,
+      /** El mejor de la casa: el que se nombra al contar cómo les fue. */
+      mejor: [...mios].sort((a, b) => a.puesto - b.puesto || b.puntaje - a.puntaje)[0],
     };
+
+    return cabecera;
   }
 
   /** Buscar por institución, tutor, nombre o DNI. Para atender por teléfono. */
@@ -1434,6 +1534,281 @@ export class ResultadosFinalService {
     return {
       buffer: (await libro.xlsx.writeBuffer()) as unknown as Buffer,
       nombre: nombreArchivo(soloPremiados ? 'premiacion-final' : 'resultados-final-macrorregional'),
+    };
+  }
+
+  /**
+   * El cuadro de su delegación, en Excel, para el tutor.
+   *
+   * Lo pide para el periódico mural o para mandárselo al director, así que la
+   * tabla tiene que entenderse sola: los dos puestos de cada alumno con de
+   * cuántos salen y una columna que dice si está premiado, sin que haga falta
+   * abrir el sistema al lado para interpretarla.
+   */
+  async miExcel(tutorId: string): Promise<{ buffer: Buffer; nombre: string }> {
+    const datos = await this.miDelegacion(tutorId);
+    if (!datos.publicado) {
+      throw new NotFoundException('Los resultados de la final todavía no están publicados.');
+    }
+    if (!datos.resumen || datos.categorias.length === 0) {
+      throw new NotFoundException('Su delegación no tiene estudiantes en la final.');
+    }
+
+    const ambito = (datos.ambitoTexto || '').toUpperCase();
+    const columnas = [
+      { header: 'CAT.', width: 8 },
+      { header: 'GRADO', width: 20 },
+      { header: 'DNI', width: 14 },
+      { header: 'APELLIDOS Y NOMBRES', width: 38 },
+      { header: 'PUNTAJE', width: 11 },
+      { header: 'ACIERTOS', width: 11 },
+      { header: 'ERRORES', width: 11 },
+      { header: 'BLANCOS', width: 11 },
+      { header: 'PUESTO EN SU CATEGORÍA', width: 23 },
+      { header: 'DE CUÁNTOS', width: 13 },
+      { header: `PUESTO ENTRE ${ambito ? `${ambito}S` : 'LOS SUYOS'}`, width: 23 },
+      { header: 'DE CUÁNTOS', width: 13 },
+      { header: 'PREMIADO', width: 12 },
+    ];
+
+    const libro = new ExcelJS.Workbook();
+    libro.creator = 'I OMASUR UNI 2026';
+    const hoja = libro.addWorksheet('MI DELEGACIÓN');
+
+    escribirTitulo(
+      hoja,
+      columnas.length,
+      `${datos.titulo} · ${datos.institucion}`,
+      `${datos.tutor ? `${datos.tutor} · ` : ''}${datos.modalidadTexto} · ` +
+        `${datos.resumen.rindieron} rindieron la final · ` +
+        `${datos.resumen.premiados} entre los ${datos.puestos} primeros de su categoría`,
+      datos.resumen.rindieron,
+    );
+    escribirEncabezados(hoja, columnas);
+
+    for (const c of datos.categorias) {
+      for (const a of c.alumnos) {
+        const fila = hoja.addRow([
+          a.categoria,
+          a.grado,
+          a.dni,
+          a.nombres,
+          a.puntaje,
+          a.correctas,
+          a.incorrectas,
+          a.blancos,
+          a.puesto + (a.empatado ? ' (empate)' : ''),
+          a.rindieron,
+          a.puestoAmbito + (a.empatadoAmbito ? ' (empate)' : ''),
+          a.rindieronAmbito,
+          a.premiado ? 'SÍ' : '—',
+        ]);
+        fila.getCell(3).numFmt = '@';
+        fila.getCell(5).font = { bold: true, color: { argb: GRANATE } };
+        if (a.premiado) {
+          fila.getCell(columnas.length).font = { bold: true, color: { argb: 'FFB45309' } };
+        }
+      }
+    }
+
+    return {
+      buffer: (await libro.xlsx.writeBuffer()) as unknown as Buffer,
+      nombre: nombreArchivo(`final-${datos.institucion || 'mi-delegacion'}`),
+    };
+  }
+
+  /**
+   * Cuántos hay en cada categoría y ámbito, para la pantalla de descargas.
+   *
+   * No es un resultado: es el índice del archivo, para que quien lo baja sepa
+   * de antemano cuántas hojas trae y con cuánta gente dentro.
+   */
+  async cuadroAmbitos() {
+    const [{ general }, config, consolidado] = await Promise.all([
+      this.tablas(),
+      this.config(),
+      this.examen.consolidado(),
+    ]);
+
+    const ambitos = AMBITOS.map((a) => {
+      const suyos = general.filter((r) => r.ambito === a.id);
+      return {
+        id: a.id,
+        texto: a.texto,
+        detalle: a.detalle,
+        total: suyos.length,
+        categorias: GRADOS.filter((g) => suyos.some((r) => r.categoria === g.categoria)).map(
+          (g) => {
+            const dentro = suyos.filter((r) => r.categoria === g.categoria);
+            return {
+              categoria: g.categoria,
+              grado: g.label,
+              total: dentro.length,
+              mejor: Math.max(...dentro.map((r) => r.puntaje)),
+            };
+          },
+        ),
+      };
+    });
+
+    return {
+      ambitos,
+      puestos: config.puestos,
+      resumen: {
+        rindieron: general.length,
+        /** Las hojas que trae el archivo completo: las de cada grupo y la de todos. */
+        hojas: ambitos.reduce((suma, a) => suma + a.categorias.length, 0) + 1,
+        salonesPendientes: consolidado.resumen.pendientes,
+      },
+    };
+  }
+
+  /**
+   * Todo el orden de la final, por categoría y por modalidad.
+   *
+   * Una hoja por cada categoría dentro de cada ámbito —que es el orden con el
+   * que de verdad se premia a cada grupo— y delante una hoja con todos para
+   * filtrar a mano. El puesto general va también en cada hoja, porque es el
+   * que se nombró en el acto y si faltara parecería otro resultado.
+   */
+  async excelAmbitos(soloAmbito?: Ambito): Promise<{ buffer: Buffer; nombre: string }> {
+    const [config, { general, porAmbito }] = await Promise.all([this.config(), this.tablas()]);
+    const ficha = this.fichaDe(general, porAmbito, config.puestos);
+    const todos = general.map(ficha);
+    const ambitos = AMBITOS.filter((a) => !soloAmbito || a.id === soloAmbito);
+
+    const libro = new ExcelJS.Workbook();
+    libro.creator = 'I OMASUR UNI 2026';
+
+    // ------------------------------------------------------ la hoja de todos
+    const columnasTodos = [
+      { header: 'CAT.', width: 8 },
+      { header: 'GRADO', width: 20 },
+      { header: 'ÁMBITO', width: 11 },
+      { header: 'PUESTO EN SU ÁMBITO', width: 21 },
+      { header: 'PUESTO GENERAL', width: 17 },
+      { header: 'DNI', width: 14 },
+      { header: 'APELLIDOS Y NOMBRES', width: 38 },
+      { header: 'INSTITUCIÓN EDUCATIVA', width: 38 },
+      { header: 'MODALIDAD', width: 18 },
+      { header: 'ACIERTOS', width: 11 },
+      { header: 'ERRORES', width: 11 },
+      { header: 'BLANCOS', width: 11 },
+      { header: 'PUNTAJE', width: 11 },
+      { header: 'PREMIADO', width: 12 },
+    ];
+
+    const deEsteArchivo = todos.filter((r) => !soloAmbito || r.ambito === soloAmbito);
+    const hojaTodos = libro.addWorksheet('TODOS');
+    escribirTitulo(
+      hojaTodos,
+      columnasTodos.length,
+      'Final macrorregional · todos los que rindieron',
+      soloAmbito
+        ? `Solo ${AMBITO_PLURAL[soloAmbito]} · el puesto de cada uno dentro de su categoría`
+        : 'Cada uno con su puesto dentro de su ámbito y su puesto entre todos los de su categoría',
+      deEsteArchivo.length,
+    );
+    escribirEncabezados(hojaTodos, columnasTodos);
+
+    [...deEsteArchivo]
+      .sort(
+        (a, b) =>
+          a.categoria.localeCompare(b.categoria) ||
+          a.ambito.localeCompare(b.ambito) ||
+          a.puestoAmbito - b.puestoAmbito,
+      )
+      .forEach((r) => {
+        const fila = hojaTodos.addRow([
+          r.categoria,
+          r.grado,
+          r.ambitoTexto,
+          r.puestoAmbito + (r.empatadoAmbito ? ' (empate)' : ''),
+          r.puesto + (r.empatado ? ' (empate)' : ''),
+          r.dni,
+          r.nombres,
+          r.institucion,
+          r.modalidadTexto,
+          r.correctas,
+          r.incorrectas,
+          r.blancos,
+          r.puntaje,
+          r.premiado ? 'SÍ' : '—',
+        ]);
+        fila.getCell(6).numFmt = '@';
+        fila.getCell(13).font = { bold: true, color: { argb: GRANATE } };
+      });
+
+    // ------------------------------------- una hoja por categoría y ámbito
+    const columnas = [
+      { header: 'PUESTO', width: 10 },
+      { header: 'DNI', width: 14 },
+      { header: 'APELLIDOS Y NOMBRES', width: 38 },
+      { header: 'INSTITUCIÓN EDUCATIVA', width: 38 },
+      { header: 'MODALIDAD', width: 18 },
+      { header: 'ACIERTOS', width: 11 },
+      { header: 'ERRORES', width: 11 },
+      { header: 'BLANCOS', width: 11 },
+      { header: 'PUNTAJE', width: 11 },
+      { header: 'ENTREGÓ', width: 11 },
+      { header: 'PUESTO GENERAL', width: 17 },
+    ];
+
+    for (const a of ambitos) {
+      for (const g of GRADOS) {
+        const suyos = todos
+          .filter((r) => r.ambito === a.id && r.categoria === g.categoria)
+          .sort((x, y) => x.puestoAmbito - y.puestoAmbito);
+        if (suyos.length === 0) continue;
+
+        const hoja = libro.addWorksheet(
+          `${a.id === 'PUBLICO' ? 'PÚB' : 'PRIV'} · CAT. ${g.categoria}`,
+        );
+        escribirTitulo(
+          hoja,
+          columnas.length,
+          `CAT. ${g.categoria} · ${g.label} · ${a.texto.toUpperCase()}`,
+          `${a.detalle} ${suyos.length} ${suyos.length === 1 ? 'estudiante' : 'estudiantes'} · ` +
+            `mejor puntaje ${suyos[0].puntaje}`,
+          suyos.length,
+        );
+        escribirEncabezados(hoja, columnas);
+
+        suyos.forEach((r) => {
+          const fila = hoja.addRow([
+            r.puestoAmbito + (r.empatadoAmbito ? ' (empate)' : ''),
+            r.dni,
+            r.nombres,
+            r.institucion,
+            r.modalidadTexto,
+            r.correctas,
+            r.incorrectas,
+            r.blancos,
+            r.puntaje,
+            r.horaEntrega || '—',
+            r.puesto + (r.empatado ? ' (empate)' : ''),
+          ]);
+          fila.getCell(2).numFmt = '@';
+          fila.getCell(9).font = { bold: true, color: { argb: GRANATE } };
+          if (r.puestoAmbito <= 3) {
+            fila.getCell(1).font = { bold: true, color: { argb: 'FFB45309' } };
+          }
+        });
+      }
+    }
+
+    if (general.length === 0) {
+      libro.addWorksheet('Sin datos').getCell('A1').value =
+        'Todavía no hay respuestas de la final.';
+    }
+
+    return {
+      buffer: (await libro.xlsx.writeBuffer()) as unknown as Buffer,
+      nombre: nombreArchivo(
+        soloAmbito
+          ? `final-por-categoria-${AMBITO_PLURAL[soloAmbito]}`
+          : 'final-por-categoria-y-modalidad',
+      ),
     };
   }
 }
